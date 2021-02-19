@@ -1,15 +1,11 @@
-import { BuildManifest } from './manifests/build';
 import fs from 'fs-extra';
 import AdmZip from 'adm-zip';
 import path from 'path';
-import crc from 'crc';
-import { DistributionManifest } from './manifests/distribution';
 import readRecurse from 'fs-readdir-recursive';
-import { InstallInfo, InstallManifest } from './manifests/install';
 import axios from 'axios';
-import { UpdateInfo } from './manifests/updateInfo';
 import { Stream } from 'stream';
-import { CrcInfo } from './manifests/module';
+import hasha from 'hasha';
+import { BuildManifest, CrcInfo, DistributionManifest, InstallInfo, InstallManifest, UpdateInfo } from './manifests';
 
 export interface DownloadProgress {
     file: string;
@@ -28,17 +24,25 @@ const FULL_FILE = 'full.zip';
 const BASE_FILE = 'base.zip';
 
 export const build = async (buildManifest: BuildManifest): Promise<DistributionManifest> => {
+    const generateHashFromPath = (absolutePath: string): string => {
+        // The hash is undefined if the path doesn't exist.
+        if (!fs.existsSync(absolutePath)) return undefined;
+
+        const stats = fs.statSync(absolutePath);
+        if (stats.isFile()) return hasha(path.basename(absolutePath) + hasha.fromFileSync(absolutePath));
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define
+        return generateHashFromPaths(fs.readdirSync(absolutePath).map((i) => path.join(absolutePath, i)));
+    };
+
+    const generateHashFromPaths = (absolutePaths: string[]): string =>
+        hasha(absolutePaths.map((p) => hasha(path.basename(p) + generateHashFromPath(p))).join(''));
+
     const zip = async (sourcePath: string, zipDest: string): Promise<string> => {
         console.log('Calculating CRC', { source: sourcePath, dest: zipDest });
         const filesInModule = readRecurse(sourcePath);
-        let crcValue = 0;
-
-        for (const file of filesInModule) {
-            crcValue = crc.crc32(await fs.readFile(path.join(sourcePath, file)), crcValue);
-        }
 
         const crcInfo: CrcInfo = {
-            crc32: crcValue.toString(16),
+            hash: generateHashFromPaths(filesInModule),
         };
         await fs.writeJSON(path.join(sourcePath, SINGLE_MODULE_MANIFEST), crcInfo);
 
@@ -47,7 +51,7 @@ export const build = async (buildManifest: BuildManifest): Promise<DistributionM
         zip.addLocalFolder(sourcePath);
         zip.writeZip(zipDest);
 
-        return crcInfo.crc32;
+        return crcInfo.hash;
     };
 
     const zipAndDelete = async (sourcePath: string, zipDest: string): Promise<string> => {
@@ -106,15 +110,15 @@ export const build = async (buildManifest: BuildManifest): Promise<DistributionM
         const distributionManifest: DistributionManifest = {
             modules: [],
             base: {
-                crc32: '',
+                hash: '',
                 files: [],
             },
-            fullCrc32: ''
+            fullHash: ''
         };
 
         // Create full zip
         console.log('Creating full ZIP');
-        distributionManifest.fullCrc32 = await zip(tempDir, path.join(buildManifest.outDir, FULL_FILE));
+        distributionManifest.fullHash = await zip(tempDir, path.join(buildManifest.outDir, FULL_FILE));
 
         // Zip Modules
         console.log('Creating module ZIPs');
@@ -125,7 +129,7 @@ export const build = async (buildManifest: BuildManifest): Promise<DistributionM
             const crc32 = await zipAndDelete(sourcePath, zipDest);
             distributionManifest.modules.push({
                 ...module,
-                crc32,
+                hash: crc32,
             });
         }));
 
@@ -133,7 +137,7 @@ export const build = async (buildManifest: BuildManifest): Promise<DistributionM
         console.log('Creating base ZIP');
         distributionManifest.base.files = readRecurse(tempDir).map(toUnixPath);
         const zipDest = path.join(buildManifest.outDir, BASE_FILE);
-        distributionManifest.base.crc32 = await zipAndDelete(tempDir, zipDest);
+        distributionManifest.base.hash = await zipAndDelete(tempDir, zipDest);
 
         await fs.writeJSON(path.join(buildManifest.outDir, MODULES_MANIFEST), distributionManifest);
         return distributionManifest;
@@ -175,7 +179,7 @@ export const needsUpdate = async (source: string, destDir: string): Promise<Upda
         return updateInfo;
     }
 
-    if (existingInstall.base.crc32 !== distribution.base.crc32) {
+    if (existingInstall.base.hash !== distribution.base.hash) {
         console.log('Base CRC does not match. Update needed.');
         updateInfo.needsUpdate = true;
         updateInfo.baseChanged = true;
@@ -184,7 +188,7 @@ export const needsUpdate = async (source: string, destDir: string): Promise<Upda
     updateInfo.addedModules = distribution.modules.filter(e => !existingInstall.modules.find(f => e.name === f.name));
     updateInfo.removedModules = existingInstall.modules.filter(e => !distribution.modules.find(f => e.name === f.name));
     updateInfo.updatedModules = existingInstall.modules.filter(e =>
-        !distribution.modules.find(f => e.crc32 === f.crc32)
+        !distribution.modules.find(f => e.hash === f.hash)
         && !updateInfo.addedModules.includes(e)
         && !updateInfo.removedModules.includes(e));
 
@@ -203,7 +207,7 @@ export const install = async (source: string, destDir: string, onDownloadProgres
     const validateCrc = (targetCrc: string, zipFile: AdmZip): boolean => {
         console.log('Validating file CRC');
         const moduleFile: CrcInfo = JSON.parse(zipFile.readAsText(SINGLE_MODULE_MANIFEST));
-        return targetCrc === moduleFile.crc32;
+        return targetCrc === moduleFile.hash;
     };
 
     const downloadFile = async (file: string, onDownloadProgress: DownloadProgressCallback): Promise<Buffer> => {
@@ -268,7 +272,7 @@ export const install = async (source: string, destDir: string, onDownloadProgres
 
     // Do fresh install using the full zip file if needed
     if (updateInfo.isFreshInstall) {
-        await downloadAndInstall(FULL_FILE, destDir, updateInfo.distributionManifest.fullCrc32, onDownloadProgress);
+        await downloadAndInstall(FULL_FILE, destDir, updateInfo.distributionManifest.fullHash, onDownloadProgress);
         return done(updateInfo.distributionManifest);
     }
 
@@ -287,10 +291,10 @@ export const install = async (source: string, destDir: string, onDownloadProgres
     const newInstallManifest: InstallManifest = {
         modules: [],
         base: {
-            crc32: '',
+            hash: '',
             files: [],
         },
-        fullCrc32: ''
+        fullHash: ''
     };
 
     // Delete all old base files and install new base files
@@ -303,7 +307,7 @@ export const install = async (source: string, destDir: string, onDownloadProgres
             }
         });
 
-        await downloadAndInstall(BASE_FILE, destDir, updateInfo.distributionManifest.base.crc32, onDownloadProgress);
+        await downloadAndInstall(BASE_FILE, destDir, updateInfo.distributionManifest.base.hash, onDownloadProgress);
         newInstallManifest.base = updateInfo.distributionManifest.base;
     } else {
         newInstallManifest.base = oldInstallManifest.base;
@@ -326,12 +330,12 @@ export const install = async (source: string, destDir: string, onDownloadProgres
         await downloadAndInstall(
             `${module.name}.zip`,
             path.join(destDir, module.sourceDir),
-            newModule.crc32,
+            newModule.hash,
             onDownloadProgress
         );
         newInstallManifest.modules.push(newModule);
     }
 
-    newInstallManifest.fullCrc32 = updateInfo.distributionManifest.fullCrc32;
+    newInstallManifest.fullHash = updateInfo.distributionManifest.fullHash;
     return done(newInstallManifest);
 };
