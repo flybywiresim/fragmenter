@@ -30,7 +30,6 @@ export const build = async (buildManifest: BuildManifest): Promise<DistributionM
 
         const stats = fs.statSync(absolutePath);
         if (stats.isFile()) return hasha(path.basename(absolutePath) + hasha.fromFileSync(absolutePath));
-        // eslint-disable-next-line @typescript-eslint/no-use-before-define
         return generateHashFromPaths(fs.readdirSync(absolutePath).map((i) => path.join(absolutePath, i)));
     };
 
