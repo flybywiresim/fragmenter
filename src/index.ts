@@ -24,20 +24,20 @@ const INSTALL_MANIFEST = 'install.json';
 const FULL_FILE = 'full.zip';
 const BASE_FILE = 'base.zip';
 
-export const build = (buildManifest: BuildManifest): DistributionManifest => {
-    const zip = (sourcePath: string, zipDest: string): string => {
+export const build = async (buildManifest: BuildManifest): Promise<DistributionManifest> => {
+    const zip = async (sourcePath: string, zipDest: string): Promise<string> => {
         console.log('Calculating CRC', { source: sourcePath, dest: zipDest });
         const filesInModule = readRecurse(sourcePath);
         let crcValue = 0;
 
-        filesInModule.forEach(file => {
-            crcValue = crc.crc32(fs.readFileSync(path.join(sourcePath, file)), crcValue);
-        });
+        for (const file of filesInModule) {
+            crcValue = crc.crc32(await fs.readFile(path.join(sourcePath, file)), crcValue);
+        }
 
         const crcInfo: CrcInfo = {
             crc32: crcValue.toString(16),
         };
-        fs.writeJSONSync(path.join(sourcePath, SINGLE_MODULE_MANIFEST), crcInfo);
+        await fs.writeJSON(path.join(sourcePath, SINGLE_MODULE_MANIFEST), crcInfo);
 
         console.log('Creating ZIP', { source: sourcePath, dest: zipDest });
         const zip = new AdmZip();
@@ -47,9 +47,9 @@ export const build = (buildManifest: BuildManifest): DistributionManifest => {
         return crcInfo.crc32;
     };
 
-    const zipAndDelete = (sourcePath: string, zipDest: string): string => {
+    const zipAndDelete = async (sourcePath: string, zipDest: string): Promise<string> => {
         console.log('Creating ZIP ', { source: sourcePath, dest: zipDest });
-        const crc = zip(sourcePath, zipDest);
+        const crc = await zip(sourcePath, zipDest);
         fs.rmdirSync(sourcePath, { recursive: true });
 
         return crc;
@@ -91,10 +91,10 @@ export const build = (buildManifest: BuildManifest): DistributionManifest => {
     if (fs.existsSync(buildManifest.outDir)) {
         fs.rmdirSync(buildManifest.outDir, { recursive: true });
     }
-    fs.mkdirSync(buildManifest.outDir, { recursive: true });
+    await fs.mkdir(buildManifest.outDir, { recursive: true });
 
     // Create a temp dir with all required files
-    const tempDir = fs.mkdtempSync('fbw-build-');
+    const tempDir = await fs.mkdtemp('fbw-build-');
 
     // Trap everything to ensure a proper cleanup of the temp directory
     try {
@@ -111,31 +111,31 @@ export const build = (buildManifest: BuildManifest): DistributionManifest => {
 
         // Create full zip
         console.log('Creating full ZIP');
-        distributionManifest.fullCrc32 = zip(tempDir, path.join(buildManifest.outDir, FULL_FILE));
+        distributionManifest.fullCrc32 = await zip(tempDir, path.join(buildManifest.outDir, FULL_FILE));
 
         // Zip Modules
         console.log('Creating module ZIPs');
-        buildManifest.modules.forEach(module => {
+        await Promise.all(buildManifest.modules.map(async module => {
             const sourcePath = path.join(tempDir, module.sourceDir);
             const zipDest = path.join(buildManifest.outDir, `${module.name}.zip`);
 
-            const crc32 = zipAndDelete(sourcePath, zipDest);
+            const crc32 = await zipAndDelete(sourcePath, zipDest);
             distributionManifest.modules.push({
                 ...module,
                 crc32,
             });
-        });
+        }));
 
         // Zip the rest
         console.log('Creating base ZIP');
         distributionManifest.base.files = readRecurse(tempDir).map(toUnixPath);
         const zipDest = path.join(buildManifest.outDir, BASE_FILE);
-        distributionManifest.base.crc32 = zipAndDelete(tempDir, zipDest);
+        distributionManifest.base.crc32 = await zipAndDelete(tempDir, zipDest);
 
-        fs.writeJSONSync(path.join(buildManifest.outDir, MODULES_MANIFEST), distributionManifest);
+        await fs.writeJSON(path.join(buildManifest.outDir, MODULES_MANIFEST), distributionManifest);
         return distributionManifest;
     } catch (e) {
-        fs.rmdirSync(tempDir, { recursive: true });
+        await fs.rmdirSync(tempDir, { recursive: true });
         throw e;
     }
 };
@@ -161,7 +161,7 @@ export const needsUpdate = async (source: string, destDir: string): Promise<Upda
     };
 
     if (fs.existsSync(installManifestPath)) {
-        existingInstall = fs.readJSONSync(installManifestPath);
+        existingInstall = await fs.readJSON(installManifestPath);
         console.log('Existing install', existingInstall);
     } else {
         console.log('No existing install found. Update needed.');
@@ -246,7 +246,7 @@ export const install = async (source: string, destDir: string, onDownloadProgres
         }
 
         console.log('Extracting ZIP to', destDir);
-        zipFile.extractAllTo(destDir);
+        await zipFile.extractAllToAsync(destDir);
     };
 
     const done = (manifest: InstallManifest): InstallInfo => {
@@ -274,7 +274,7 @@ export const install = async (source: string, destDir: string, onDownloadProgres
 
     // Get existing manifest
     const installManifestPath = path.join(destDir, INSTALL_MANIFEST);
-    const oldInstallManifest: InstallManifest = fs.readJSONSync(installManifestPath);
+    const oldInstallManifest: InstallManifest = await fs.readJSON(installManifestPath);
 
     // Exit when no update is needed
     if (!updateInfo.needsUpdate) {
