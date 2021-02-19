@@ -18,6 +18,9 @@ export interface DownloadProgress {
     percent: number;
 }
 
+// eslint-disable-next-line no-unused-vars
+export type DownloadProgressCallback = (_: DownloadProgress) => void;
+
 const SINGLE_MODULE_MANIFEST = 'module.json';
 const MODULES_MANIFEST = 'modules.json';
 const INSTALL_MANIFEST = 'install.json';
@@ -192,8 +195,7 @@ export const needsUpdate = async (source: string, destDir: string): Promise<Upda
     return updateInfo;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-empty-function,no-unused-vars
-export const install = async (source: string, destDir: string, onDownloadProgress: (_: DownloadProgress) => void = () => {}): Promise<InstallInfo> => {
+export const install = async (source: string, destDir: string, onDownloadProgress: DownloadProgressCallback = () => { return; }): Promise<InstallInfo> => {
     const client = axios.create({
         baseURL: source
     });
@@ -204,8 +206,7 @@ export const install = async (source: string, destDir: string, onDownloadProgres
         return targetCrc === moduleFile.crc32;
     };
 
-    // eslint-disable-next-line no-unused-vars
-    const downloadFile = async (file: string, onDownloadProgress: (_: DownloadProgress) => void): Promise<Buffer> => {
+    const downloadFile = async (file: string, onDownloadProgress: DownloadProgressCallback): Promise<Buffer> => {
         return new Promise<Buffer>((resolve, reject) => {
             client.get<Stream>(file, { responseType: 'stream' })
                 .then(response => {
@@ -234,8 +235,7 @@ export const install = async (source: string, destDir: string, onDownloadProgres
         });
     };
 
-    // eslint-disable-next-line no-unused-vars
-    const downloadAndInstall = async (file: string, destDir: string, crc: string, onDownloadProgress: (_: DownloadProgress) => void) => {
+    const downloadAndInstall = async (file: string, destDir: string, crc: string, onDownloadProgress: DownloadProgressCallback) => {
         const loadedFile = await downloadFile(file, onDownloadProgress);
 
         const zipFile = new AdmZip(loadedFile);
