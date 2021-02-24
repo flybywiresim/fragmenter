@@ -7,6 +7,9 @@ import { Stream } from 'stream';
 import hasha from 'hasha';
 import { BuildManifest, CrcInfo, DistributionManifest, InstallInfo, InstallManifest, UpdateInfo } from './manifests';
 
+/**
+ * Download progress for a single zip file.
+ */
 export interface DownloadProgress {
     file: string;
     total: number;
@@ -23,6 +26,10 @@ const INSTALL_MANIFEST = 'install.json';
 const FULL_FILE = 'full.zip';
 const BASE_FILE = 'base.zip';
 
+/**
+ * Build the individual zip files with the provided spec.
+ * @param buildManifest Specification for the source, destination and modules to build.
+ */
 export const build = async (buildManifest: BuildManifest): Promise<DistributionManifest> => {
     const generateHashFromPath = (absolutePath: string): string => {
         // The hash is undefined if the path doesn't exist.
@@ -146,6 +153,11 @@ export const build = async (buildManifest: BuildManifest): Promise<DistributionM
     }
 };
 
+/**
+ * Check, whether a destination directory is up to date or needs to be updated.
+ * @param source Base URL of the artifact server.
+ * @param destDir Directory to validate.
+ */
 export const needsUpdate = async (source: string, destDir: string): Promise<UpdateInfo> => {
     if (!fs.existsSync(destDir)) {
         throw new Error('Destination directory does not exist!');
@@ -198,6 +210,12 @@ export const needsUpdate = async (source: string, destDir: string): Promise<Upda
     return updateInfo;
 };
 
+/**
+ * Install or update the newest available version.
+ * @param source Base URL of the artifact server.
+ * @param destDir Directory to install into.
+ * @param onDownloadProgress Callback for progress events. The percentage resets to 0 for every file downloaded.
+ */
 export const install = async (source: string, destDir: string, onDownloadProgress: DownloadProgressCallback = () => { return; }): Promise<InstallInfo> => {
     const client = axios.create({
         baseURL: source
