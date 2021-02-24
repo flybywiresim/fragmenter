@@ -44,7 +44,7 @@ const test = async (doBuild: boolean, doCheck: boolean, doInstall: boolean) => {
 
         if (doInstall) {
             console.log('\n\n======== Install ========\n');
-            const details = await install('http://localhost:5000', './test/mods/A32NX', progress => {
+            const details = await install('http://localhost:5000', './test/mods/A32NX', false, progress => {
                 console.log(progress);
             });
             console.log(details);
@@ -55,4 +55,4 @@ const test = async (doBuild: boolean, doCheck: boolean, doInstall: boolean) => {
 };
 
 
-test(true, false, true);
+test(false, false, true);
