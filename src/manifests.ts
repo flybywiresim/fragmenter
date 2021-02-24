@@ -15,7 +15,9 @@ export interface DistributionManifest {
     fullHash: string;
 }
 
-export type InstallManifest = DistributionManifest
+export interface InstallManifest extends DistributionManifest {
+    source: string;
+}
 
 export interface InstallInfo {
     changed: boolean;

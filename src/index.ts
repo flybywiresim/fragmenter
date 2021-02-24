@@ -299,7 +299,7 @@ export const install = async (source: string, destDir: string, forceFreshInstall
         }
 
         await downloadAndInstall(FULL_FILE, destDir, updateInfo.distributionManifest.fullHash, onDownloadProgress);
-        return done(updateInfo.distributionManifest);
+        return done({ ...updateInfo.distributionManifest, source });
     }
 
     // Get existing manifest
@@ -320,7 +320,8 @@ export const install = async (source: string, destDir: string, forceFreshInstall
             hash: '',
             files: [],
         },
-        fullHash: ''
+        fullHash: '',
+        source
     };
 
     // Delete all old base files and install new base files
