@@ -1,10 +1,10 @@
-import { build, install, needsUpdate } from './index';
+import { pack, install, needsUpdate } from './index';
 
 const test = async (doBuild: boolean, doCheck: boolean, doInstall: boolean) => {
     try {
         if (doBuild) {
             console.log('\n\n======== Build ========\n');
-            const details = await build({
+            const details = await pack({
                 baseDir: '../a32nx/A32NX',
                 outDir: './test/out',
                 modules: [{
@@ -44,7 +44,7 @@ const test = async (doBuild: boolean, doCheck: boolean, doInstall: boolean) => {
 
         if (doInstall) {
             console.log('\n\n======== Install ========\n');
-            const details = await install('http://localhost:5000', './test/mods/A32NX', false, progress => {
+            const details = await install('https://flybywiresim.b-cdn.net/addons/a32nx/vmaster', './test/mods/A32NX', false, progress => {
                 console.log(progress);
             });
             console.log(details);

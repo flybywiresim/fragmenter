@@ -31,7 +31,7 @@ const BASE_FILE = 'base.zip';
  * Build the individual zip files with the provided spec.
  * @param buildManifest Specification for the source, destination and modules to build.
  */
-export const build = async (buildManifest: BuildManifest): Promise<DistributionManifest> => {
+export const pack = async (buildManifest: BuildManifest): Promise<DistributionManifest> => {
     const generateHashFromPath = (absolutePath: string): string => {
         // The hash is undefined if the path doesn't exist.
         if (!fs.existsSync(absolutePath)) return undefined;
