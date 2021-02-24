@@ -105,7 +105,7 @@ export const pack = async (buildManifest: BuildManifest): Promise<DistributionMa
     if (fs.existsSync(buildManifest.outDir)) {
         fs.rmdirSync(buildManifest.outDir, { recursive: true });
     }
-    await fs.mkdir(buildManifest.outDir, { recursive: true });
+    fs.mkdirSync(buildManifest.outDir, { recursive: true });
 
     // Create a temp dir with all required files
     const tempDir = await fs.mkdtemp('fbw-build-');
