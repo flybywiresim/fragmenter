@@ -1,7 +1,7 @@
 {
-  "name": "@flybywiresim/chunkx",
+  "name": "@flybywiresim/fragmenter",
   "version": "0.1.0",
-  "description": "",
+  "description": "Tool used to create zip files for multiple modules and only update what is needed",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
