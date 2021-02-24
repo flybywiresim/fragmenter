@@ -215,8 +215,11 @@ export const needsUpdate = async (source: string, destDir: string): Promise<Upda
  * @param source Base URL of the artifact server.
  * @param destDir Directory to install into.
  * @param onDownloadProgress Callback for progress events. The percentage resets to 0 for every file downloaded.
+ * @param forceFreshInstall Force a fresh install.
  */
-export const install = async (source: string, destDir: string, onDownloadProgress: DownloadProgressCallback = () => { return; }): Promise<InstallInfo> => {
+export const install = async (source: string, destDir: string, forceFreshInstall: boolean, onDownloadProgress: DownloadProgressCallback = () => {
+    return;
+}): Promise<InstallInfo> => {
     const client = axios.create({
         baseURL: source
     });
@@ -288,7 +291,12 @@ export const install = async (source: string, destDir: string, onDownloadProgres
     console.log('Update info', updateInfo);
 
     // Do fresh install using the full zip file if needed
-    if (updateInfo.isFreshInstall) {
+    if (updateInfo.isFreshInstall || forceFreshInstall) {
+        if (fs.existsSync(destDir)) {
+            fs.rmdirSync(destDir, { recursive: true });
+            fs.mkdirSync(destDir);
+        }
+
         await downloadAndInstall(FULL_FILE, destDir, updateInfo.distributionManifest.fullHash, onDownloadProgress);
         return done(updateInfo.distributionManifest);
     }
