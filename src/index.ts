@@ -6,6 +6,7 @@ import axios from 'axios';
 import { Stream } from 'stream';
 import hasha from 'hasha';
 import { BuildManifest, CrcInfo, DistributionManifest, InstallInfo, InstallManifest, UpdateInfo } from './manifests';
+import urljoin from 'url-join';
 
 /**
  * Download progress for a single zip file.
@@ -166,7 +167,7 @@ export const needsUpdate = async (source: string, destDir: string): Promise<Upda
     const installManifestPath = path.join(destDir, INSTALL_MANIFEST);
     let existingInstall: InstallManifest;
 
-    const distribution: DistributionManifest = (await axios.get(new URL(MODULES_MANIFEST, source).href)).data;
+    const distribution: DistributionManifest = (await axios.get(urljoin(source, MODULES_MANIFEST))).data;
     const updateInfo: UpdateInfo = {
         needsUpdate: false,
         isFreshInstall: false,
