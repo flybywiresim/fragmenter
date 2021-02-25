@@ -10,7 +10,7 @@ import urljoin from 'url-join';
  * Download progress for a single zip file.
  */
 export interface DownloadProgress {
-    file: string;
+    module: string;
     total: number;
     loaded: number;
     percent: number;
@@ -226,7 +226,7 @@ export const install = async (source: string, destDir: string, forceFreshInstall
         return targetCrc === moduleFile.hash;
     };
 
-    const downloadFile = async (file: string, onDownloadProgress: DownloadProgressCallback): Promise<Buffer> => {
+    const downloadFile = async (file: string, moduleName: string, onDownloadProgress: DownloadProgressCallback): Promise<Buffer> => {
         const response = await fetch(urljoin(source, file));
         const reader = response.body.getReader();
         const contentLength = +response.headers.get('Content-Length');
@@ -246,7 +246,7 @@ export const install = async (source: string, destDir: string, forceFreshInstall
             receivedLength += value.length;
 
             onDownloadProgress({
-                file,
+                module: moduleName,
                 total: contentLength,
                 loaded: receivedLength,
                 percent: Math.floor(receivedLength / contentLength * 100),
@@ -263,8 +263,8 @@ export const install = async (source: string, destDir: string, forceFreshInstall
         return Buffer.from(chunksAll);
     };
 
-    const downloadAndInstall = async (file: string, destDir: string, crc: string, onDownloadProgress: DownloadProgressCallback) => {
-        const loadedFile = await downloadFile(file, onDownloadProgress);
+    const downloadAndInstall = async (file: string, destDir: string, moduleName: string, crc: string, onDownloadProgress: DownloadProgressCallback) => {
+        const loadedFile = await downloadFile(file,moduleName, onDownloadProgress);
 
         const zipFile = new AdmZip(loadedFile);
         const crcMatch = validateCrc(crc, zipFile);
@@ -301,7 +301,7 @@ export const install = async (source: string, destDir: string, forceFreshInstall
             fs.mkdirSync(destDir);
         }
 
-        await downloadAndInstall(FULL_FILE, destDir, updateInfo.distributionManifest.fullHash, onDownloadProgress);
+        await downloadAndInstall(FULL_FILE, destDir, 'Full', updateInfo.distributionManifest.fullHash, onDownloadProgress);
         return done({ ...updateInfo.distributionManifest, source });
     }
 
@@ -337,7 +337,7 @@ export const install = async (source: string, destDir: string, forceFreshInstall
             }
         });
 
-        await downloadAndInstall(BASE_FILE, destDir, updateInfo.distributionManifest.base.hash, onDownloadProgress);
+        await downloadAndInstall(BASE_FILE, destDir, 'Base', updateInfo.distributionManifest.base.hash, onDownloadProgress);
         newInstallManifest.base = updateInfo.distributionManifest.base;
     } else {
         newInstallManifest.base = oldInstallManifest.base;
@@ -360,6 +360,7 @@ export const install = async (source: string, destDir: string, forceFreshInstall
         await downloadAndInstall(
             `${module.name}.zip`,
             path.join(destDir, module.sourceDir),
+            module.name,
             newModule.hash,
             onDownloadProgress
         );
