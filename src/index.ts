@@ -2,8 +2,6 @@ import fs from 'fs-extra';
 import AdmZip from 'adm-zip';
 import path from 'path';
 import readRecurse from 'fs-readdir-recursive';
-import axios from 'axios';
-import { Stream } from 'stream';
 import hasha from 'hasha';
 import { BuildManifest, CrcInfo, DistributionManifest, InstallInfo, InstallManifest, UpdateInfo } from './manifests';
 import urljoin from 'url-join';
@@ -167,7 +165,7 @@ export const needsUpdate = async (source: string, destDir: string): Promise<Upda
     const installManifestPath = path.join(destDir, INSTALL_MANIFEST);
     let existingInstall: InstallManifest;
 
-    const distribution: DistributionManifest = (await axios.get(urljoin(source, MODULES_MANIFEST))).data;
+    const distribution: DistributionManifest = (await fetch(urljoin(source, MODULES_MANIFEST)).then(response => response.json()));
     const updateInfo: UpdateInfo = {
         needsUpdate: false,
         isFreshInstall: false,
@@ -221,9 +219,6 @@ export const needsUpdate = async (source: string, destDir: string): Promise<Upda
 export const install = async (source: string, destDir: string, forceFreshInstall: boolean, onDownloadProgress: DownloadProgressCallback = () => {
     return;
 }): Promise<InstallInfo> => {
-    const client = axios.create({
-        baseURL: source
-    });
 
     const validateCrc = (targetCrc: string, zipFile: AdmZip): boolean => {
         console.log('Validating file CRC');
@@ -232,32 +227,40 @@ export const install = async (source: string, destDir: string, forceFreshInstall
     };
 
     const downloadFile = async (file: string, onDownloadProgress: DownloadProgressCallback): Promise<Buffer> => {
-        return new Promise<Buffer>((resolve, reject) => {
-            client.get<Stream>(file, { responseType: 'stream' })
-                .then(response => {
-                    const totalLength = parseInt(response.headers['content-length']);
-                    let loaded = 0;
+        const response = await fetch(urljoin(source, file));
+        const reader = response.body.getReader();
+        const contentLength = +response.headers.get('Content-Length');
 
-                    const allChunks = new Uint8Array(totalLength);
+        let receivedLength = 0;
+        const chunks = [];
 
-                    response.data.on('data', chunk => {
-                        allChunks.set(chunk, loaded);
-                        loaded += chunk.length;
+        // eslint-disable-next-line no-constant-condition
+        while(true) {
+            const { done, value } = await reader.read();
 
-                        onDownloadProgress({
-                            file,
-                            total: totalLength,
-                            loaded: loaded,
-                            percent: Math.floor(loaded / totalLength * 100),
-                        });
-                    });
+            if (done) {
+                break;
+            }
 
-                    response.data.once('close', () => {
-                        resolve(Buffer.from(allChunks));
-                    });
-                })
-                .catch(e => reject(e));
-        });
+            chunks.push(value);
+            receivedLength += value.length;
+
+            onDownloadProgress({
+                file,
+                total: contentLength,
+                loaded: receivedLength,
+                percent: Math.floor(receivedLength / contentLength * 100),
+            });
+        }
+
+        const chunksAll = new Uint8Array(receivedLength);
+        let position = 0;
+        for(const chunk of chunks) {
+            chunksAll.set(chunk, position);
+            position += chunk.length;
+        }
+
+        return Buffer.from(chunksAll);
     };
 
     const downloadAndInstall = async (file: string, destDir: string, crc: string, onDownloadProgress: DownloadProgressCallback) => {
