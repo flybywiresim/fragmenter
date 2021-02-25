@@ -333,7 +333,7 @@ export const install = async (source: string, destDir: string, forceFreshInstall
         oldInstallManifest.base.files.forEach(file => {
             const fullPath = path.join(destDir, file);
             if (fs.existsSync(fullPath)) {
-                fs.rmSync(fullPath);
+                fs.removeSync(fullPath);
             }
         });
 
