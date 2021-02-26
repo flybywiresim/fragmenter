@@ -18,6 +18,7 @@ export interface DownloadProgress {
 
 // eslint-disable-next-line no-unused-vars
 export type DownloadProgressCallback = (_: DownloadProgress) => void;
+export type CancelCallback = () => Promise<boolean>;
 
 const SINGLE_MODULE_MANIFEST = 'module.json';
 const MODULES_MANIFEST = 'modules.json';
@@ -153,6 +154,15 @@ export const pack = async (buildManifest: BuildManifest): Promise<DistributionMa
 };
 
 /**
+ * Get the current install manifest.
+ * @param destDir Directory to search.
+ */
+export const getCurrentInstall = (destDir: string): InstallManifest => {
+    const installManifestPath = path.join(destDir, INSTALL_MANIFEST);
+    return fs.readJSONSync(installManifestPath);
+};
+
+/**
  * Check, whether a destination directory is up to date or needs to be updated.
  * @param source Base URL of the artifact server.
  * @param destDir Directory to validate.
@@ -215,10 +225,9 @@ export const needsUpdate = async (source: string, destDir: string): Promise<Upda
  * @param destDir Directory to install into.
  * @param onDownloadProgress Callback for progress events. The percentage resets to 0 for every file downloaded.
  * @param forceFreshInstall Force a fresh install.
+ * @param signal Abort signal
  */
-export const install = async (source: string, destDir: string, forceFreshInstall: boolean, onDownloadProgress: DownloadProgressCallback = () => {
-    return;
-}): Promise<InstallInfo> => {
+export const install = async (source: string, destDir: string, forceFreshInstall: boolean, onDownloadProgress: DownloadProgressCallback, signal: AbortSignal): Promise<InstallInfo> => {
 
     const validateCrc = (targetCrc: string, zipFile: AdmZip): boolean => {
         console.log('Validating file CRC');
@@ -226,8 +235,8 @@ export const install = async (source: string, destDir: string, forceFreshInstall
         return targetCrc === moduleFile.hash;
     };
 
-    const downloadFile = async (file: string, moduleName: string, onDownloadProgress: DownloadProgressCallback): Promise<Buffer> => {
-        const response = await fetch(urljoin(source, file));
+    const downloadFile = async (file: string, moduleName: string): Promise<Buffer> => {
+        const response = await fetch(urljoin(source, file), { signal });
         const reader = response.body.getReader();
         const contentLength = +response.headers.get('Content-Length');
 
@@ -238,7 +247,7 @@ export const install = async (source: string, destDir: string, forceFreshInstall
         while(true) {
             const { done, value } = await reader.read();
 
-            if (done) {
+            if (done || signal.aborted) {
                 break;
             }
 
@@ -263,8 +272,12 @@ export const install = async (source: string, destDir: string, forceFreshInstall
         return Buffer.from(chunksAll);
     };
 
-    const downloadAndInstall = async (file: string, destDir: string, moduleName: string, crc: string, onDownloadProgress: DownloadProgressCallback) => {
-        const loadedFile = await downloadFile(file,moduleName, onDownloadProgress);
+    const downloadAndInstall = async (file: string, destDir: string, moduleName: string, crc: string) => {
+        const loadedFile = await downloadFile(file, moduleName);
+
+        if (signal.aborted) {
+            return;
+        }
 
         const zipFile = new AdmZip(loadedFile);
         const crcMatch = validateCrc(crc, zipFile);
@@ -278,9 +291,12 @@ export const install = async (source: string, destDir: string, forceFreshInstall
     };
 
     const done = (manifest: InstallManifest): InstallInfo => {
-        fs.writeJSONSync(path.join(destDir, INSTALL_MANIFEST), manifest);
+        const canceled = signal.aborted;
+        if (!canceled) {
+            fs.writeJSONSync(path.join(destDir, INSTALL_MANIFEST), manifest);
+        }
         return {
-            changed: true,
+            changed: !canceled,
             manifest: manifest,
         };
     };
@@ -301,7 +317,7 @@ export const install = async (source: string, destDir: string, forceFreshInstall
             fs.mkdirSync(destDir);
         }
 
-        await downloadAndInstall(FULL_FILE, destDir, 'Full', updateInfo.distributionManifest.fullHash, onDownloadProgress);
+        await downloadAndInstall(FULL_FILE, destDir, 'Full', updateInfo.distributionManifest.fullHash);
         return done({ ...updateInfo.distributionManifest, source });
     }
 
@@ -337,7 +353,7 @@ export const install = async (source: string, destDir: string, forceFreshInstall
             }
         });
 
-        await downloadAndInstall(BASE_FILE, destDir, 'Base', updateInfo.distributionManifest.base.hash, onDownloadProgress);
+        await downloadAndInstall(BASE_FILE, destDir, 'Base', updateInfo.distributionManifest.base.hash);
         newInstallManifest.base = updateInfo.distributionManifest.base;
     } else {
         newInstallManifest.base = oldInstallManifest.base;
@@ -361,8 +377,7 @@ export const install = async (source: string, destDir: string, forceFreshInstall
             `${module.name}.zip`,
             path.join(destDir, module.sourceDir),
             module.name,
-            newModule.hash,
-            onDownloadProgress
+            newModule.hash
         );
         newInstallManifest.modules.push(newModule);
     }
