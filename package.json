@@ -20,8 +20,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
-    "test": "npm run build && node ./dist/test.js",
+    "build": "rollup -c",
     "serve": "serve -s test/out",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix"
