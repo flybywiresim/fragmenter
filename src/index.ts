@@ -18,7 +18,6 @@ export interface DownloadProgress {
 
 // eslint-disable-next-line no-unused-vars
 export type DownloadProgressCallback = (_: DownloadProgress) => void;
-export type CancelCallback = () => Promise<boolean>;
 
 const SINGLE_MODULE_MANIFEST = 'module.json';
 const MODULES_MANIFEST = 'modules.json';
@@ -31,24 +30,24 @@ const BASE_FILE = 'base.zip';
  * @param buildManifest Specification for the source, destination and modules to build.
  */
 export const pack = async (buildManifest: BuildManifest): Promise<DistributionManifest> => {
-    const generateHashFromPath = (absolutePath: string): string => {
+    const generateHashFromPath = (absolutePath: string, baseDir: string): string => {
         // The hash is undefined if the path doesn't exist.
         if (!fs.existsSync(absolutePath)) return undefined;
 
         const stats = fs.statSync(absolutePath);
-        if (stats.isFile()) return hasha(path.basename(absolutePath) + hasha.fromFileSync(absolutePath));
-        return generateHashFromPaths(fs.readdirSync(absolutePath).map((i) => path.join(absolutePath, i)));
+        if (stats.isFile()) return hasha(path.relative(absolutePath, baseDir) + hasha.fromFileSync(absolutePath));
+        return generateHashFromPaths(fs.readdirSync(absolutePath).map((i) => path.join(absolutePath, i)), baseDir);
     };
 
-    const generateHashFromPaths = (absolutePaths: string[]): string =>
-        hasha(absolutePaths.map((p) => hasha(path.basename(p) + generateHashFromPath(p))).join(''));
+    const generateHashFromPaths = (absolutePaths: string[], baseDir: string): string =>
+        hasha(absolutePaths.map((p) => hasha(path.basename(p) + generateHashFromPath(p, baseDir))).join(''));
 
     const zip = async (sourcePath: string, zipDest: string): Promise<string> => {
         console.log('Calculating CRC', { source: sourcePath, dest: zipDest });
-        const filesInModule = readRecurse(sourcePath);
+        const filesInModule = readRecurse(sourcePath).map(i => path.resolve(sourcePath, i));
 
         const crcInfo: CrcInfo = {
-            hash: generateHashFromPaths(filesInModule),
+            hash: generateHashFromPaths(filesInModule, sourcePath),
         };
         await fs.writeJSON(path.join(sourcePath, SINGLE_MODULE_MANIFEST), crcInfo);
 
@@ -56,12 +55,12 @@ export const pack = async (buildManifest: BuildManifest): Promise<DistributionMa
         const zip = new AdmZip();
         zip.addLocalFolder(sourcePath);
         zip.writeZip(zipDest);
+        console.log('Done writing zip', zipDest);
 
         return crcInfo.hash;
     };
 
     const zipAndDelete = async (sourcePath: string, zipDest: string): Promise<string> => {
-        console.log('Creating ZIP ', { source: sourcePath, dest: zipDest });
         const crc = await zip(sourcePath, zipDest);
         fs.rmdirSync(sourcePath, { recursive: true });
 
@@ -128,16 +127,16 @@ export const pack = async (buildManifest: BuildManifest): Promise<DistributionMa
 
         // Zip Modules
         console.log('Creating module ZIPs');
-        await Promise.all(buildManifest.modules.map(async module => {
+        for (const module of buildManifest.modules) {
             const sourcePath = path.join(tempDir, module.sourceDir);
             const zipDest = path.join(buildManifest.outDir, `${module.name}.zip`);
 
-            const crc32 = await zipAndDelete(sourcePath, zipDest);
+            const hash = await zipAndDelete(sourcePath, zipDest);
             distributionManifest.modules.push({
                 ...module,
-                hash: crc32,
+                hash,
             });
-        }));
+        }
 
         // Zip the rest
         console.log('Creating base ZIP');
