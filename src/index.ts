@@ -6,6 +6,12 @@ import hasha from 'hasha';
 import { BuildManifest, CrcInfo, DistributionManifest, InstallInfo, InstallManifest, UpdateInfo } from './manifests';
 import urljoin from 'url-join';
 
+// There's a circular dependency when using the correct import `import JSZip from 'jszip';` which
+// will break the build.
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
+import JSZip from 'jszip/dist/jszip';
+
 /**
  * Download progress for a single zip file.
  */
@@ -42,6 +48,59 @@ export const pack = async (buildManifest: BuildManifest): Promise<DistributionMa
     const generateHashFromPaths = (absolutePaths: string[], baseDir: string): string =>
         hasha(absolutePaths.map((p) => hasha(path.basename(p) + generateHashFromPath(p, baseDir))).join(''));
 
+    const getFilePathsRecursively = (dir: string): string[] => {
+        // returns a flat array of absolute paths of all files recursively contained in the dir
+        let results: string[] = [];
+        const list = fs.readdirSync(dir);
+
+        let pending = list.length;
+        if (!pending) return results;
+
+        for (let file of list) {
+            file = path.resolve(dir, file);
+
+            const stat = fs.lstatSync(file);
+
+            if (stat && stat.isDirectory()) {
+                results = results.concat(getFilePathsRecursively(file));
+            } else {
+                results.push(file);
+            }
+
+            if (!--pending) return results;
+        }
+
+        return results;
+    };
+
+    const getZipOfFolder = (dir: string): JSZip => {
+        // returns a JSZip instance filled with contents of dir.
+
+        const allPaths = getFilePathsRecursively(dir);
+
+        const zip = new JSZip();
+        for (const filePath of allPaths) {
+            const addPath = path.relative(dir, filePath);
+            const data = fs.readFileSync(filePath);
+            const stat = fs.lstatSync(filePath);
+            const permissions = stat.mode;
+
+            if (stat.isSymbolicLink()) {
+                zip.file(addPath, fs.readlinkSync(filePath), {
+                    unixPermissions: parseInt('120755', 8), // This permission can be more permissive than necessary for non-executables but we don't mind.
+                    dir: stat.isDirectory()
+                });
+            } else {
+                zip.file(addPath, data, {
+                    unixPermissions: permissions,
+                    dir: stat.isDirectory()
+                });
+            }
+        }
+
+        return zip;
+    };
+
     const zip = async (sourcePath: string, zipDest: string): Promise<string> => {
         console.log('Calculating CRC', { source: sourcePath, dest: zipDest });
         const filesInModule = readRecurse(sourcePath).map(i => path.resolve(sourcePath, i));
@@ -52,9 +111,10 @@ export const pack = async (buildManifest: BuildManifest): Promise<DistributionMa
         await fs.writeJSON(path.join(sourcePath, SINGLE_MODULE_MANIFEST), crcInfo);
 
         console.log('Creating ZIP', { source: sourcePath, dest: zipDest });
-        const zip = new AdmZip();
-        zip.addLocalFolder(sourcePath);
-        zip.writeZip(zipDest);
+
+        const zip = getZipOfFolder(sourcePath);
+        const buffer = await zip.generateAsync({ type:'nodebuffer', compression: 'DEFLATE' });
+        await fs.writeFile(zipDest, buffer);
         console.log('Done writing zip', zipDest);
 
         return crcInfo.hash;
