@@ -5,6 +5,7 @@ import readRecurse from 'fs-readdir-recursive';
 import hasha from 'hasha';
 import { BuildManifest, CrcInfo, DistributionManifest, InstallInfo, InstallManifest, UpdateInfo } from './manifests';
 import urljoin from 'url-join';
+import * as util from 'util';
 
 /**
  * Download progress for a single zip file.
@@ -279,14 +280,14 @@ export const install = async (source: string, destDir: string, forceFreshInstall
         }
 
         const zipFile = new AdmZip(loadedFile);
-        const crcMatch = validateCrc(crc, zipFile);
+        const extract = util.promisify(zipFile.extractAllToAsync);
 
-        if (!crcMatch) {
+        if (!validateCrc(crc, zipFile)) {
             throw new Error('File CRC does not match');
         }
 
         console.log('Extracting ZIP to', destDir);
-        await zipFile.extractAllToAsync(destDir);
+        await extract(destDir, false);
     };
 
     const done = (manifest: InstallManifest): InstallInfo => {
