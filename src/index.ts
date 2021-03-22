@@ -236,6 +236,7 @@ export const install = async (source: string, destDir: string, forceFreshInstall
     };
 
     const downloadFile = async (file: string, moduleName: string): Promise<Buffer> => {
+        console.log('Downloading file', file);
         const response = await fetch(urljoin(source, file), { signal });
         const reader = response.body.getReader();
         const contentLength = +response.headers.get('Content-Length');
@@ -269,6 +270,7 @@ export const install = async (source: string, destDir: string, forceFreshInstall
             position += chunk.length;
         }
 
+        console.log('Finished downloading file', file);
         return Buffer.from(chunksAll);
     };
 
@@ -288,12 +290,17 @@ export const install = async (source: string, destDir: string, forceFreshInstall
 
         console.log('Extracting ZIP to', destDir);
         await extract(destDir, false);
+        console.log('Finished extracting ZIP to', destDir);
     };
 
     const done = (manifest: InstallManifest): InstallInfo => {
         const canceled = signal.aborted;
         if (!canceled) {
-            fs.writeJSONSync(path.join(destDir, INSTALL_MANIFEST), manifest);
+            const manifestPath = path.join(destDir, INSTALL_MANIFEST);
+
+            console.log('Writing install manifest', manifest, 'to', manifestPath);
+            fs.writeJSONSync(manifestPath, manifest);
+            console.log('Finished writing install manifest', manifest, 'to', manifestPath);
         }
         return {
             changed: !canceled,
@@ -307,12 +314,15 @@ export const install = async (source: string, destDir: string, forceFreshInstall
     }
 
     // Get modules to update
+    console.log('Finding modules to update');
     const updateInfo = await needsUpdate(source, destDir);
     console.log('Update info', updateInfo);
 
     // Do fresh install using the full zip file if needed
     if (updateInfo.isFreshInstall || forceFreshInstall) {
+        console.log('Performing fresh install');
         if (fs.existsSync(destDir)) {
+            console.log('Cleaning destination directory', destDir);
             fs.rmdirSync(destDir, { recursive: true });
             fs.mkdirSync(destDir);
         }
@@ -324,9 +334,11 @@ export const install = async (source: string, destDir: string, forceFreshInstall
     // Get existing manifest
     const installManifestPath = path.join(destDir, INSTALL_MANIFEST);
     const oldInstallManifest: InstallManifest = await fs.readJSON(installManifestPath);
+    console.log('Found existing manifest', oldInstallManifest);
 
     // Exit when no update is needed
     if (!updateInfo.needsUpdate) {
+        console.log('No update needed');
         return {
             changed: false,
             manifest: oldInstallManifest,
@@ -356,23 +368,31 @@ export const install = async (source: string, destDir: string, forceFreshInstall
         await downloadAndInstall(BASE_FILE, destDir, 'Base', updateInfo.distributionManifest.base.hash);
         newInstallManifest.base = updateInfo.distributionManifest.base;
     } else {
+        console.log('No base update needed');
         newInstallManifest.base = oldInstallManifest.base;
     }
 
     newInstallManifest.modules = oldInstallManifest.modules;
 
     // Delete removed and updated modules
+    console.log('Removing changed and removed modules', [...updateInfo.removedModules, ...updateInfo.updatedModules]);
     for (const module of [...updateInfo.removedModules, ...updateInfo.updatedModules]) {
+        console.log('Removing module', module);
         const fullPath = path.join(destDir, module.sourceDir);
         if (fs.existsSync(fullPath)) {
             fs.rmdirSync(fullPath, { recursive: true });
+            console.log('Removed module', module);
+        } else {
+            console.warn('Module', module, 'marked for removal not found');
         }
         newInstallManifest.modules.splice(newInstallManifest.modules.findIndex(m => m.name === module.name), 1);
     }
 
     // Install updated and added modules
+    console.log('Installing changed and added modules', [...updateInfo.updatedModules, ...updateInfo.addedModules]);
     for (const module of [...updateInfo.updatedModules, ...updateInfo.addedModules]) {
         const newModule = updateInfo.distributionManifest.modules.find(m => m.name === module.name);
+        console.log('Installing new module', newModule);
         await downloadAndInstall(
             `${module.name}.zip`,
             path.join(destDir, module.sourceDir),
