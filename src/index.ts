@@ -260,6 +260,13 @@ export const install = async (
         return targetCrc === moduleFile.hash;
     };
 
+    const validateCrcOrThrow = (targetCrc: string, zipFile: AdmZip): void => {
+        if (!validateCrc(targetCrc, zipFile)) {
+            console.log('CRC wasn\'t correct');
+            throw new Error('Invalid CRC');
+        }
+    };
+
     const downloadFile = async (file: string, moduleName: string, retryCount: number): Promise<Buffer> => {
         console.log('Downloading file', file);
         let url = urljoin(source, file);
@@ -310,22 +317,26 @@ export const install = async (
 
     const downloadAndInstall = async (file: string, destDir: string, moduleName: string, crc: string) => {
         let retryCount = 0;
-        let zipFile: AdmZip;
-        let loadedCorrect = false;
 
-        while (!loadedCorrect) {
-            const loadedFile = await downloadFile(file, moduleName, retryCount);
+        while (retryCount < 5) {
+            try {
+                const loadedFile = await downloadFile(file, moduleName, retryCount);
+                const zipFile = new AdmZip(loadedFile);
 
-            if (signal.aborted) {
+                validateCrcOrThrow(crc, zipFile);
+                console.log('CRC was correct');
+
+                if (signal.aborted) {
+                    return;
+                }
+
+                console.log('Extracting ZIP to', destDir);
+                const extract = util.promisify(zipFile.extractAllToAsync);
+                await extract(destDir, false);
+                console.log('Finished extracting ZIP to', destDir);
                 return;
-            }
-
-            zipFile = new AdmZip(loadedFile);
-
-            if (validateCrc(crc, zipFile)) {
-                console.log('CRC is correct');
-                loadedCorrect = true;
-            } else if (retryCount < 5) {
+            } catch (e) {
+                console.error(e);
                 retryCount++;
 
                 onDownloadProgress({
@@ -337,17 +348,12 @@ export const install = async (
                     retryWait: (2 ** retryCount) * 1_000,
                 });
 
-                console.log('CRC wasn\'t correct. Retrying in', 2 ** retryCount, 'seconds');
+                console.error('Retrying in', 2 ** retryCount, 'seconds');
                 await new Promise(r => setTimeout(r, (2 ** retryCount) * 1_000));
-            } else {
-                throw new Error('File CRC does not match');
             }
         }
 
-        console.log('Extracting ZIP to', destDir);
-        const extract = util.promisify(zipFile.extractAllToAsync);
-        await extract(destDir, false);
-        console.log('Finished extracting ZIP to', destDir);
+        throw new Error(`Error while downloading ${moduleName} module`);
     };
 
     const done = (manifest: InstallManifest): InstallInfo => {
