@@ -15,6 +15,13 @@ export interface DownloadProgress {
     total: number;
     loaded: number;
     percent: number;
+    retryCount: number;
+    retryWait: number;
+}
+
+export interface InstallOptions {
+    forceFreshInstall: boolean,
+    forceCacheBust: boolean,
 }
 
 // eslint-disable-next-line no-unused-vars
@@ -224,20 +231,34 @@ export const needsUpdate = async (source: string, destDir: string): Promise<Upda
  * @param source Base URL of the artifact server.
  * @param destDir Directory to install into.
  * @param onDownloadProgress Callback for progress events. The percentage resets to 0 for every file downloaded.
- * @param forceFreshInstall Force a fresh install.
+ * @param options Advanced options for the install.
  * @param signal Abort signal
  */
-export const install = async (source: string, destDir: string, forceFreshInstall: boolean, onDownloadProgress: DownloadProgressCallback, signal: AbortSignal): Promise<InstallInfo> => {
+export const install = async (
+    source: string,
+    destDir: string,
+    onDownloadProgress: DownloadProgressCallback,
+    signal: AbortSignal,
+    options: InstallOptions): Promise<InstallInfo> => {
 
     const validateCrc = (targetCrc: string, zipFile: AdmZip): boolean => {
         console.log('Validating file CRC');
         const moduleFile: CrcInfo = JSON.parse(zipFile.readAsText(SINGLE_MODULE_MANIFEST));
+        console.log('CRC should be', targetCrc, 'and is', moduleFile.hash);
+
         return targetCrc === moduleFile.hash;
     };
 
-    const downloadFile = async (file: string, moduleName: string): Promise<Buffer> => {
+    const downloadFile = async (file: string, moduleName: string, retryCount: number): Promise<Buffer> => {
         console.log('Downloading file', file);
-        const response = await fetch(urljoin(source, file), { signal });
+        let url = urljoin(source, file);
+
+        if (retryCount || options.forceCacheBust) {
+            url += `?cache=${Math.random() * 999999999}`;
+        }
+
+        console.log('Downloading from', url);
+        const response = await fetch(url, { signal });
         const reader = response.body.getReader();
         const contentLength = +response.headers.get('Content-Length');
 
@@ -260,6 +281,8 @@ export const install = async (source: string, destDir: string, forceFreshInstall
                 total: contentLength,
                 loaded: receivedLength,
                 percent: Math.floor(receivedLength / contentLength * 100),
+                retryCount,
+                retryWait: 0,
             });
         }
 
@@ -275,20 +298,43 @@ export const install = async (source: string, destDir: string, forceFreshInstall
     };
 
     const downloadAndInstall = async (file: string, destDir: string, moduleName: string, crc: string) => {
-        const loadedFile = await downloadFile(file, moduleName);
+        let retryCount = 0;
+        let zipFile: AdmZip;
+        let loadedCorrect = false;
 
-        if (signal.aborted) {
-            return;
-        }
+        while (!loadedCorrect) {
+            const loadedFile = await downloadFile(file, moduleName, retryCount);
 
-        const zipFile = new AdmZip(loadedFile);
-        const extract = util.promisify(zipFile.extractAllToAsync);
+            if (signal.aborted) {
+                return;
+            }
 
-        if (!validateCrc(crc, zipFile)) {
-            throw new Error('File CRC does not match');
+            zipFile = new AdmZip(loadedFile);
+
+            if (validateCrc(crc, zipFile)) {
+                console.log('CRC is correct');
+                loadedCorrect = true;
+            } else if (retryCount < 5) {
+                retryCount++;
+
+                onDownloadProgress({
+                    module: moduleName,
+                    total: 1,
+                    loaded: 0,
+                    percent: 0,
+                    retryCount,
+                    retryWait: (2 ** retryCount) * 1_000,
+                });
+
+                console.log('CRC wasn\'t correct. Retrying in', 2 ** retryCount, 'seconds');
+                await new Promise(r => setTimeout(r, (2 ** retryCount) * 1_000));
+            } else {
+                throw new Error('File CRC does not match');
+            }
         }
 
         console.log('Extracting ZIP to', destDir);
+        const extract = util.promisify(zipFile.extractAllToAsync);
         await extract(destDir, false);
         console.log('Finished extracting ZIP to', destDir);
     };
@@ -319,7 +365,7 @@ export const install = async (source: string, destDir: string, forceFreshInstall
     console.log('Update info', updateInfo);
 
     // Do fresh install using the full zip file if needed
-    if (updateInfo.isFreshInstall || forceFreshInstall) {
+    if (updateInfo.isFreshInstall || options.forceFreshInstall) {
         console.log('Performing fresh install');
         if (fs.existsSync(destDir)) {
             console.log('Cleaning destination directory', destDir);
