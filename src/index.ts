@@ -24,6 +24,10 @@ export interface InstallOptions {
     forceCacheBust: boolean,
 }
 
+export interface NeedsUpdateOptions {
+    forceCacheBust: boolean,
+}
+
 // eslint-disable-next-line no-unused-vars
 export type DownloadProgressCallback = (_: DownloadProgress) => void;
 
@@ -173,8 +177,9 @@ export const getCurrentInstall = (destDir: string): InstallManifest => {
  * Check, whether a destination directory is up to date or needs to be updated.
  * @param source Base URL of the artifact server.
  * @param destDir Directory to validate.
+ * @param options Advanced options for the check.
  */
-export const needsUpdate = async (source: string, destDir: string): Promise<UpdateInfo> => {
+export const needsUpdate = async (source: string, destDir: string, options?: NeedsUpdateOptions): Promise<UpdateInfo> => {
     if (!fs.existsSync(destDir)) {
         throw new Error('Destination directory does not exist!');
     }
@@ -182,7 +187,13 @@ export const needsUpdate = async (source: string, destDir: string): Promise<Upda
     const installManifestPath = path.join(destDir, INSTALL_MANIFEST);
     let existingInstall: InstallManifest;
 
-    const distribution: DistributionManifest = (await fetch(urljoin(source, MODULES_MANIFEST)).then(response => response.json()));
+    let url = urljoin(source, MODULES_MANIFEST);
+    if (options?.forceCacheBust) {
+        url += `?cache=${Math.random() * 999999999}`;
+    }
+
+    console.log('Downloading module info from', url);
+    const distribution: DistributionManifest = (await fetch(url).then(response => response.json()));
     const updateInfo: UpdateInfo = {
         needsUpdate: false,
         isFreshInstall: false,
@@ -361,7 +372,7 @@ export const install = async (
 
     // Get modules to update
     console.log('Finding modules to update');
-    const updateInfo = await needsUpdate(source, destDir);
+    const updateInfo = await needsUpdate(source, destDir, { forceCacheBust: options.forceCacheBust });
     console.log('Update info', updateInfo);
 
     // Do fresh install using the full zip file if needed
