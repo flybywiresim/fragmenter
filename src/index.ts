@@ -1,8 +1,13 @@
 import fs from 'fs-extra';
 import AdmZip from 'adm-zip';
 import path from 'path';
+// eslint-disable-next-line import/no-unresolved
 import readRecurse from 'fs-readdir-recursive';
+// eslint-disable-next-line import/no-unresolved
 import hasha from 'hasha';
+import urljoin from 'url-join';
+import * as util from 'util';
+import EventEmitter from 'events';
 import {
     BuildManifest,
     CrcInfo,
@@ -10,11 +15,8 @@ import {
     InstallInfo,
     InstallManifest,
     Module,
-    UpdateInfo
+    UpdateInfo,
 } from './manifests';
-import urljoin from 'url-join';
-import * as util from 'util';
-import EventEmitter from 'events';
 import TypedEventEmitter from './typed-emitter';
 
 /**
@@ -34,9 +36,6 @@ export interface InstallOptions {
 export interface NeedsUpdateOptions {
     forceCacheBust: boolean,
 }
-
-// eslint-disable-next-line no-unused-vars
-export type DownloadProgressCallback = (_: DownloadProgress) => void;
 
 const SINGLE_MODULE_MANIFEST = 'module.json';
 const MODULES_MANIFEST = 'modules.json';
@@ -58,16 +57,13 @@ export const pack = async (buildManifest: BuildManifest): Promise<DistributionMa
         return generateHashFromPaths(fs.readdirSync(absolutePath).map((i) => path.join(absolutePath, i)), baseDir);
     };
 
-    const generateHashFromPaths = (absolutePaths: string[], baseDir: string): string =>
-        hasha(absolutePaths.map((p) => hasha(path.basename(p) + generateHashFromPath(p, baseDir))).join(''));
+    const generateHashFromPaths = (absolutePaths: string[], baseDir: string): string => hasha(absolutePaths.map((p) => hasha(path.basename(p) + generateHashFromPath(p, baseDir))).join(''));
 
     const zip = async (sourcePath: string, zipDest: string): Promise<string> => {
         console.log('Calculating CRC', { source: sourcePath, dest: zipDest });
-        const filesInModule = readRecurse(sourcePath).map(i => path.resolve(sourcePath, i));
+        const filesInModule = readRecurse(sourcePath).map((i) => path.resolve(sourcePath, i));
 
-        const crcInfo: CrcInfo = {
-            hash: generateHashFromPaths(filesInModule, sourcePath),
-        };
+        const crcInfo: CrcInfo = { hash: generateHashFromPaths(filesInModule, sourcePath) };
         await fs.writeJSON(path.join(sourcePath, SINGLE_MODULE_MANIFEST), crcInfo);
 
         console.log('Creating ZIP', { source: sourcePath, dest: zipDest });
@@ -99,12 +95,12 @@ export const pack = async (buildManifest: BuildManifest): Promise<DistributionMa
     };
 
     // Manifest validation: Nested modules are not supported yet
-    buildManifest.modules.forEach(moduleA => {
+    buildManifest.modules.forEach((moduleA) => {
         if (['base', 'full'].includes(moduleA.name.toLowerCase())) {
             throw new Error(`'${moduleA.name}' is a reserved module name`);
         }
 
-        buildManifest.modules.forEach(moduleB => {
+        buildManifest.modules.forEach((moduleB) => {
             if (moduleA !== moduleB) {
                 const pathDiff = path.relative(moduleA.sourceDir, moduleB.sourceDir);
 
@@ -137,7 +133,7 @@ export const pack = async (buildManifest: BuildManifest): Promise<DistributionMa
                 hash: '',
                 files: [],
             },
-            fullHash: ''
+            fullHash: '',
         };
 
         // Create full zip
@@ -200,7 +196,7 @@ export const needsUpdate = async (source: string, destDir: string, options?: Nee
     }
 
     console.log('Downloading module info from', url);
-    const distribution: DistributionManifest = (await fetch(url).then(response => response.json()));
+    const distribution: DistributionManifest = (await fetch(url).then((response) => response.json()));
     const updateInfo: UpdateInfo = {
         needsUpdate: false,
         isFreshInstall: false,
@@ -230,10 +226,9 @@ export const needsUpdate = async (source: string, destDir: string, options?: Nee
         updateInfo.baseChanged = true;
     }
 
-    updateInfo.addedModules = distribution.modules.filter(e => !existingInstall.modules.find(f => e.name === f.name));
-    updateInfo.removedModules = existingInstall.modules.filter(e => !distribution.modules.find(f => e.name === f.name));
-    updateInfo.updatedModules = existingInstall.modules.filter(e =>
-        !distribution.modules.find(f => e.hash === f.hash)
+    updateInfo.addedModules = distribution.modules.filter((e) => !existingInstall.modules.find((f) => e.name === f.name));
+    updateInfo.removedModules = existingInstall.modules.filter((e) => !distribution.modules.find((f) => e.name === f.name));
+    updateInfo.updatedModules = existingInstall.modules.filter((e) => !distribution.modules.find((f) => e.hash === f.hash)
         && !updateInfo.addedModules.includes(e)
         && !updateInfo.removedModules.includes(e));
 
@@ -261,7 +256,8 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
      * @param source Base URL of the artifact server.
      * @param destDir Directory to install into.
      */
-    constructor(private source: string, private destDir: string,) {
+    constructor(private source: string, private destDir: string) {
+        // eslint-disable-next-line constructor-super
         super();
     }
 
@@ -270,7 +266,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
      * @param options Advanced options for the install.
      * @param signal Abort signal
      */
-    public async install (signal: AbortSignal, options?: InstallOptions): Promise<InstallInfo> {
+    public async install(signal: AbortSignal, options?: InstallOptions): Promise<InstallInfo> {
         const validateCrc = (targetCrc: string, zipFile: AdmZip): boolean => {
             console.log('Validating file CRC');
             const moduleFile: CrcInfo = JSON.parse(zipFile.readAsText(SINGLE_MODULE_MANIFEST));
@@ -303,7 +299,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             const chunks = [];
 
             // eslint-disable-next-line no-constant-condition
-            while(true) {
+            while (true) {
                 const { done, value } = await reader.read();
 
                 if (done || signal.aborted) {
@@ -316,13 +312,13 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 this.emit('downloadProgress', module, {
                     total: contentLength,
                     loaded: receivedLength,
-                    percent: Math.floor(receivedLength / contentLength * 100),
+                    percent: Math.floor((receivedLength / contentLength) * 100),
                 });
             }
 
             const chunksAll = new Uint8Array(receivedLength);
             let position = 0;
-            for(const chunk of chunks) {
+            for (const chunk of chunks) {
                 chunksAll.set(chunk, position);
                 position += chunk.length;
             }
@@ -361,7 +357,8 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
                     console.error('Retrying in', 2 ** retryCount, 'seconds');
                     this.emit('retryScheduled', module, retryCount, 2 ** retryCount);
-                    await new Promise(r => setTimeout(r, (2 ** retryCount) * 1_000));
+                    // eslint-disable-next-line no-loop-func
+                    await new Promise((r) => setTimeout(r, (2 ** retryCount) * 1_000));
                     this.emit('retryStarted', module, retryCount);
                 }
             }
@@ -381,7 +378,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             }
             return {
                 changed: !canceled,
-                manifest: manifest,
+                manifest,
             };
         };
 
@@ -431,13 +428,13 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 files: [],
             },
             fullHash: '',
-            source: this.source
+            source: this.source,
         };
 
         // Delete all old base files and install new base files
         if (updateInfo.baseChanged) {
             console.log('Updating base files');
-            oldInstallManifest.base.files.forEach(file => {
+            oldInstallManifest.base.files.forEach((file) => {
                 const fullPath = path.join(this.destDir, file);
                 if (fs.existsSync(fullPath)) {
                     fs.removeSync(fullPath);
@@ -464,19 +461,19 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             } else {
                 console.warn('Module', module, 'marked for removal not found');
             }
-            newInstallManifest.modules.splice(newInstallManifest.modules.findIndex(m => m.name === module.name), 1);
+            newInstallManifest.modules.splice(newInstallManifest.modules.findIndex((m) => m.name === module.name), 1);
         }
 
         // Install updated and added modules
         console.log('Installing changed and added modules', [...updateInfo.updatedModules, ...updateInfo.addedModules]);
         for (const module of [...updateInfo.updatedModules, ...updateInfo.addedModules]) {
-            const newModule = updateInfo.distributionManifest.modules.find(m => m.name === module.name);
+            const newModule = updateInfo.distributionManifest.modules.find((m) => m.name === module.name);
             console.log('Installing new module', newModule);
             await downloadAndInstall(
                 `${module.name}.zip`,
                 path.join(this.destDir, module.sourceDir),
                 module,
-                newModule.hash
+                newModule.hash,
             );
             newInstallManifest.modules.push(newModule);
         }
@@ -485,16 +482,3 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         return done(newInstallManifest);
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
