@@ -3,20 +3,27 @@ import AdmZip from 'adm-zip';
 import path from 'path';
 import readRecurse from 'fs-readdir-recursive';
 import hasha from 'hasha';
-import { BuildManifest, CrcInfo, DistributionManifest, InstallInfo, InstallManifest, UpdateInfo } from './manifests';
+import {
+    BuildManifest,
+    CrcInfo,
+    DistributionManifest,
+    InstallInfo,
+    InstallManifest,
+    Module,
+    UpdateInfo
+} from './manifests';
 import urljoin from 'url-join';
 import * as util from 'util';
+import EventEmitter from 'events';
+import TypedEventEmitter from './typed-emitter';
 
 /**
  * Download progress for a single zip file.
  */
 export interface DownloadProgress {
-    module: string;
     total: number;
     loaded: number;
     percent: number;
-    retryCount: number;
-    retryWait: number;
 }
 
 export interface InstallOptions {
@@ -237,234 +244,257 @@ export const needsUpdate = async (source: string, destDir: string, options?: Nee
     return updateInfo;
 };
 
-/**
- * Install or update the newest available version.
- * @param source Base URL of the artifact server.
- * @param destDir Directory to install into.
- * @param onDownloadProgress Callback for progress events. The percentage resets to 0 for every file downloaded.
- * @param options Advanced options for the install.
- * @param signal Abort signal
- */
-export const install = async (
-    source: string,
-    destDir: string,
-    onDownloadProgress: DownloadProgressCallback,
-    signal: AbortSignal,
-    options: InstallOptions): Promise<InstallInfo> => {
+export interface FragmenterInstallerEvents {
+    'error': (err: any) => void;
+    'downloadStarted': (module: Module) => void;
+    'downloadProgress': (module: Module, progress: DownloadProgress) => void;
+    'downloadFinished': (module: Module) => void;
+    'unzipStarted': (module: Module) => void;
+    'unzipFinished': (module: Module) => void;
+    'retryScheduled': (module: Module, retryCount: number, waitSeconds: number) => void;
+    'retryStarted': (module: Module, retryCount: number) => void;
+    'fullDownload': () => void;
+}
 
-    const validateCrc = (targetCrc: string, zipFile: AdmZip): boolean => {
-        console.log('Validating file CRC');
-        const moduleFile: CrcInfo = JSON.parse(zipFile.readAsText(SINGLE_MODULE_MANIFEST));
-        console.log('CRC should be', targetCrc, 'and is', moduleFile.hash);
+export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEmitter<FragmenterInstallerEvents>) {
+    /**
+     * @param source Base URL of the artifact server.
+     * @param destDir Directory to install into.
+     */
+    constructor(private source: string, private destDir: string,) {
+        super();
+    }
 
-        return targetCrc === moduleFile.hash;
-    };
+    /**
+     * Install or update the newest available version.
+     * @param options Advanced options for the install.
+     * @param signal Abort signal
+     */
+    public async install (signal: AbortSignal, options?: InstallOptions): Promise<InstallInfo> {
+        const validateCrc = (targetCrc: string, zipFile: AdmZip): boolean => {
+            console.log('Validating file CRC');
+            const moduleFile: CrcInfo = JSON.parse(zipFile.readAsText(SINGLE_MODULE_MANIFEST));
+            console.log('CRC should be', targetCrc, 'and is', moduleFile.hash);
 
-    const validateCrcOrThrow = (targetCrc: string, zipFile: AdmZip): void => {
-        if (!validateCrc(targetCrc, zipFile)) {
-            console.log('CRC wasn\'t correct');
-            throw new Error('Invalid CRC');
-        }
-    };
+            return targetCrc === moduleFile.hash;
+        };
 
-    const downloadFile = async (file: string, moduleName: string, retryCount: number): Promise<Buffer> => {
-        console.log('Downloading file', file);
-        let url = urljoin(source, file);
+        const validateCrcOrThrow = (targetCrc: string, zipFile: AdmZip): void => {
+            if (!validateCrc(targetCrc, zipFile)) {
+                console.log('CRC wasn\'t correct');
+                throw new Error('Invalid CRC');
+            }
+        };
 
-        if (retryCount || options.forceCacheBust) {
-            url += `?cache=${Math.random() * 999999999}`;
-        }
+        const downloadFile = async (file: string, module: Module, retryCount: number): Promise<Buffer> => {
+            console.log('Downloading file', file);
+            let url = urljoin(this.source, file);
 
-        console.log('Downloading from', url);
-        const response = await fetch(url, { signal });
-        const reader = response.body.getReader();
-        const contentLength = +response.headers.get('Content-Length');
-
-        let receivedLength = 0;
-        const chunks = [];
-
-        // eslint-disable-next-line no-constant-condition
-        while(true) {
-            const { done, value } = await reader.read();
-
-            if (done || signal.aborted) {
-                break;
+            if (retryCount || options?.forceCacheBust) {
+                url += `?cache=${Math.random() * 999999999}`;
             }
 
-            chunks.push(value);
-            receivedLength += value.length;
+            console.log('Downloading from', url);
+            const response = await fetch(url, { signal });
+            const reader = response.body.getReader();
+            const contentLength = +response.headers.get('Content-Length');
 
-            onDownloadProgress({
-                module: moduleName,
-                total: contentLength,
-                loaded: receivedLength,
-                percent: Math.floor(receivedLength / contentLength * 100),
-                retryCount,
-                retryWait: 0,
-            });
-        }
+            let receivedLength = 0;
+            const chunks = [];
 
-        const chunksAll = new Uint8Array(receivedLength);
-        let position = 0;
-        for(const chunk of chunks) {
-            chunksAll.set(chunk, position);
-            position += chunk.length;
-        }
+            // eslint-disable-next-line no-constant-condition
+            while(true) {
+                const { done, value } = await reader.read();
 
-        console.log('Finished downloading file', file);
-        return Buffer.from(chunksAll);
-    };
-
-    const downloadAndInstall = async (file: string, destDir: string, moduleName: string, crc: string) => {
-        let retryCount = 0;
-
-        while (retryCount < 5) {
-            try {
-                const loadedFile = await downloadFile(file, moduleName, retryCount);
-                const zipFile = new AdmZip(loadedFile);
-
-                validateCrcOrThrow(crc, zipFile);
-                console.log('CRC was correct');
-
-                if (signal.aborted) {
-                    return;
+                if (done || signal.aborted) {
+                    break;
                 }
 
-                console.log('Extracting ZIP to', destDir);
-                const extract = util.promisify(zipFile.extractAllToAsync);
-                await extract(destDir, false);
-                console.log('Finished extracting ZIP to', destDir);
-                return;
-            } catch (e) {
-                console.error(e);
-                retryCount++;
+                chunks.push(value);
+                receivedLength += value.length;
 
-                onDownloadProgress({
-                    module: moduleName,
-                    total: 1,
-                    loaded: 0,
-                    percent: 0,
-                    retryCount,
-                    retryWait: (2 ** retryCount) * 1_000,
+                this.emit('downloadProgress', module, {
+                    total: contentLength,
+                    loaded: receivedLength,
+                    percent: Math.floor(receivedLength / contentLength * 100),
                 });
-
-                console.error('Retrying in', 2 ** retryCount, 'seconds');
-                await new Promise(r => setTimeout(r, (2 ** retryCount) * 1_000));
             }
-        }
 
-        throw new Error(`Error while downloading ${moduleName} module`);
-    };
-
-    const done = (manifest: InstallManifest): InstallInfo => {
-        const canceled = signal.aborted;
-        if (!canceled) {
-            const manifestPath = path.join(destDir, INSTALL_MANIFEST);
-
-            console.log('Writing install manifest', manifest, 'to', manifestPath);
-            fs.writeJSONSync(manifestPath, manifest);
-            console.log('Finished writing install manifest', manifest, 'to', manifestPath);
-        }
-        return {
-            changed: !canceled,
-            manifest: manifest,
-        };
-    };
-
-    // Create destination directory
-    if (!fs.existsSync(destDir)) {
-        fs.mkdirSync(destDir, { recursive: true });
-    }
-
-    // Get modules to update
-    console.log('Finding modules to update');
-    const updateInfo = await needsUpdate(source, destDir, { forceCacheBust: options.forceCacheBust });
-    console.log('Update info', updateInfo);
-
-    // Do fresh install using the full zip file if needed
-    if (updateInfo.isFreshInstall || options.forceFreshInstall) {
-        console.log('Performing fresh install');
-        if (fs.existsSync(destDir)) {
-            console.log('Cleaning destination directory', destDir);
-            fs.rmdirSync(destDir, { recursive: true });
-            fs.mkdirSync(destDir);
-        }
-
-        await downloadAndInstall(FULL_FILE, destDir, 'Full', updateInfo.distributionManifest.fullHash);
-        return done({ ...updateInfo.distributionManifest, source });
-    }
-
-    // Get existing manifest
-    const installManifestPath = path.join(destDir, INSTALL_MANIFEST);
-    const oldInstallManifest: InstallManifest = await fs.readJSON(installManifestPath);
-    console.log('Found existing manifest', oldInstallManifest);
-
-    // Exit when no update is needed
-    if (!updateInfo.needsUpdate) {
-        console.log('No update needed');
-        return {
-            changed: false,
-            manifest: oldInstallManifest,
-        };
-    }
-
-    const newInstallManifest: InstallManifest = {
-        modules: [],
-        base: {
-            hash: '',
-            files: [],
-        },
-        fullHash: '',
-        source
-    };
-
-    // Delete all old base files and install new base files
-    if (updateInfo.baseChanged) {
-        console.log('Updating base files');
-        oldInstallManifest.base.files.forEach(file => {
-            const fullPath = path.join(destDir, file);
-            if (fs.existsSync(fullPath)) {
-                fs.removeSync(fullPath);
+            const chunksAll = new Uint8Array(receivedLength);
+            let position = 0;
+            for(const chunk of chunks) {
+                chunksAll.set(chunk, position);
+                position += chunk.length;
             }
-        });
 
-        await downloadAndInstall(BASE_FILE, destDir, 'Base', updateInfo.distributionManifest.base.hash);
-        newInstallManifest.base = updateInfo.distributionManifest.base;
-    } else {
-        console.log('No base update needed');
-        newInstallManifest.base = oldInstallManifest.base;
-    }
+            console.log('Finished downloading file', file);
+            return Buffer.from(chunksAll);
+        };
 
-    newInstallManifest.modules = oldInstallManifest.modules;
+        const downloadAndInstall = async (file: string, destDir: string, module: Module, crc: string) => {
+            let retryCount = 0;
 
-    // Delete removed and updated modules
-    console.log('Removing changed and removed modules', [...updateInfo.removedModules, ...updateInfo.updatedModules]);
-    for (const module of [...updateInfo.removedModules, ...updateInfo.updatedModules]) {
-        console.log('Removing module', module);
-        const fullPath = path.join(destDir, module.sourceDir);
-        if (fs.existsSync(fullPath)) {
-            fs.rmdirSync(fullPath, { recursive: true });
-            console.log('Removed module', module);
+            while (retryCount < 5) {
+                try {
+                    this.emit('downloadStarted', module);
+                    const loadedFile = await downloadFile(file, module, retryCount);
+                    this.emit('downloadFinished', module);
+
+                    const zipFile = new AdmZip(loadedFile);
+
+                    validateCrcOrThrow(crc, zipFile);
+                    console.log('CRC was correct');
+
+                    if (signal.aborted) {
+                        return;
+                    }
+
+                    console.log('Extracting ZIP to', destDir);
+                    this.emit('unzipStarted', module);
+                    await util.promisify(zipFile.extractAllToAsync)(destDir, false);
+                    this.emit('unzipFinished', module);
+                    console.log('Finished extracting ZIP to', destDir);
+                    return;
+                } catch (e) {
+                    console.error(e);
+                    retryCount++;
+
+                    console.error('Retrying in', 2 ** retryCount, 'seconds');
+                    this.emit('retryScheduled', module, retryCount, 2 ** retryCount);
+                    await new Promise(r => setTimeout(r, (2 ** retryCount) * 1_000));
+                    this.emit('retryStarted', module, retryCount);
+                }
+            }
+
+            this.emit('error', `Error while downloading ${module.name} module`);
+            throw new Error(`Error while downloading ${module.name} module`);
+        };
+
+        const done = (manifest: InstallManifest): InstallInfo => {
+            const canceled = signal.aborted;
+            if (!canceled) {
+                const manifestPath = path.join(this.destDir, INSTALL_MANIFEST);
+
+                console.log('Writing install manifest', manifest, 'to', manifestPath);
+                fs.writeJSONSync(manifestPath, manifest);
+                console.log('Finished writing install manifest', manifest, 'to', manifestPath);
+            }
+            return {
+                changed: !canceled,
+                manifest: manifest,
+            };
+        };
+
+        // Create destination directory
+        if (!fs.existsSync(this.destDir)) {
+            fs.mkdirSync(this.destDir, { recursive: true });
+        }
+
+        // Get modules to update
+        console.log('Finding modules to update');
+        const updateInfo = await needsUpdate(this.source, this.destDir, { forceCacheBust: options?.forceCacheBust });
+        console.log('Update info', updateInfo);
+
+        // Do fresh install using the full zip file if needed
+        if (updateInfo.isFreshInstall || options?.forceFreshInstall) {
+            console.log('Performing fresh install');
+            this.emit('fullDownload');
+
+            if (fs.existsSync(this.destDir)) {
+                console.log('Cleaning destination directory', this.destDir);
+                fs.rmdirSync(this.destDir, { recursive: true });
+                fs.mkdirSync(this.destDir);
+            }
+
+            await downloadAndInstall(FULL_FILE, this.destDir, { name: 'Full', sourceDir: '.' }, updateInfo.distributionManifest.fullHash);
+            return done({ ...updateInfo.distributionManifest, source: this.source });
+        }
+
+        // Get existing manifest
+        const installManifestPath = path.join(this.destDir, INSTALL_MANIFEST);
+        const oldInstallManifest: InstallManifest = await fs.readJSON(installManifestPath);
+        console.log('Found existing manifest', oldInstallManifest);
+
+        // Exit when no update is needed
+        if (!updateInfo.needsUpdate) {
+            console.log('No update needed');
+            return {
+                changed: false,
+                manifest: oldInstallManifest,
+            };
+        }
+
+        const newInstallManifest: InstallManifest = {
+            modules: [],
+            base: {
+                hash: '',
+                files: [],
+            },
+            fullHash: '',
+            source: this.source
+        };
+
+        // Delete all old base files and install new base files
+        if (updateInfo.baseChanged) {
+            console.log('Updating base files');
+            oldInstallManifest.base.files.forEach(file => {
+                const fullPath = path.join(this.destDir, file);
+                if (fs.existsSync(fullPath)) {
+                    fs.removeSync(fullPath);
+                }
+            });
+
+            await downloadAndInstall(BASE_FILE, this.destDir, { name: 'Base', sourceDir: '.' }, updateInfo.distributionManifest.base.hash);
+            newInstallManifest.base = updateInfo.distributionManifest.base;
         } else {
-            console.warn('Module', module, 'marked for removal not found');
+            console.log('No base update needed');
+            newInstallManifest.base = oldInstallManifest.base;
         }
-        newInstallManifest.modules.splice(newInstallManifest.modules.findIndex(m => m.name === module.name), 1);
-    }
 
-    // Install updated and added modules
-    console.log('Installing changed and added modules', [...updateInfo.updatedModules, ...updateInfo.addedModules]);
-    for (const module of [...updateInfo.updatedModules, ...updateInfo.addedModules]) {
-        const newModule = updateInfo.distributionManifest.modules.find(m => m.name === module.name);
-        console.log('Installing new module', newModule);
-        await downloadAndInstall(
-            `${module.name}.zip`,
-            path.join(destDir, module.sourceDir),
-            module.name,
-            newModule.hash
-        );
-        newInstallManifest.modules.push(newModule);
-    }
+        newInstallManifest.modules = oldInstallManifest.modules;
 
-    newInstallManifest.fullHash = updateInfo.distributionManifest.fullHash;
-    return done(newInstallManifest);
-};
+        // Delete removed and updated modules
+        console.log('Removing changed and removed modules', [...updateInfo.removedModules, ...updateInfo.updatedModules]);
+        for (const module of [...updateInfo.removedModules, ...updateInfo.updatedModules]) {
+            console.log('Removing module', module);
+            const fullPath = path.join(this.destDir, module.sourceDir);
+            if (fs.existsSync(fullPath)) {
+                fs.rmdirSync(fullPath, { recursive: true });
+                console.log('Removed module', module);
+            } else {
+                console.warn('Module', module, 'marked for removal not found');
+            }
+            newInstallManifest.modules.splice(newInstallManifest.modules.findIndex(m => m.name === module.name), 1);
+        }
+
+        // Install updated and added modules
+        console.log('Installing changed and added modules', [...updateInfo.updatedModules, ...updateInfo.addedModules]);
+        for (const module of [...updateInfo.updatedModules, ...updateInfo.addedModules]) {
+            const newModule = updateInfo.distributionManifest.modules.find(m => m.name === module.name);
+            console.log('Installing new module', newModule);
+            await downloadAndInstall(
+                `${module.name}.zip`,
+                path.join(this.destDir, module.sourceDir),
+                module,
+                newModule.hash
+            );
+            newInstallManifest.modules.push(newModule);
+        }
+
+        newInstallManifest.fullHash = updateInfo.distributionManifest.fullHash;
+        return done(newInstallManifest);
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
