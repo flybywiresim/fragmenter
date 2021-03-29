@@ -28,10 +28,11 @@ export interface DownloadProgress {
     percent: number;
 }
 
-export interface InstallOptions {
+export type InstallOptions = Partial<{
     forceFreshInstall: boolean,
     forceCacheBust: boolean,
-}
+    forceManifestCacheBust: boolean,
+}>;
 
 export interface NeedsUpdateOptions {
     forceCacheBust: boolean,
@@ -282,12 +283,13 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             }
         };
 
-        const downloadFile = async (file: string, module: Module, retryCount: number): Promise<Buffer> => {
+        const downloadFile = async (file: string, module: Module, retryCount: number, crc: string, fullCrc: string): Promise<Buffer> => {
             console.log('Downloading file', file);
             let url = urljoin(this.source, file);
+            url += `?moduleHash=${crc.substr(0, 7)}&fullHash=${fullCrc.substr(0, 7)}`;
 
             if (retryCount || options?.forceCacheBust) {
-                url += `?cache=${Math.random() * 999999999}`;
+                url += `&cache=${Math.random() * 999999999}`;
             }
 
             console.log('Downloading from', url);
@@ -327,13 +329,13 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             return Buffer.from(chunksAll);
         };
 
-        const downloadAndInstall = async (file: string, destDir: string, module: Module, crc: string) => {
+        const downloadAndInstall = async (file: string, destDir: string, module: Module, crc: string, fullCrc: string) => {
             let retryCount = 0;
 
-            while (retryCount < 5) {
+            while (retryCount < 5 && !signal.aborted) {
                 try {
                     this.emit('downloadStarted', module);
-                    const loadedFile = await downloadFile(file, module, retryCount);
+                    const loadedFile = await downloadFile(file, module, retryCount, crc, fullCrc);
                     this.emit('downloadFinished', module);
 
                     const zipFile = new AdmZip(loadedFile);
@@ -389,7 +391,11 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
         // Get modules to update
         console.log('Finding modules to update');
-        const updateInfo = await needsUpdate(this.source, this.destDir, { forceCacheBust: options?.forceCacheBust });
+        const updateInfo = await needsUpdate(
+            this.source,
+            this.destDir,
+            { forceCacheBust: options?.forceCacheBust || options?.forceManifestCacheBust },
+        );
         console.log('Update info', updateInfo);
 
         // Do fresh install using the full zip file if needed
@@ -403,7 +409,10 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 fs.mkdirSync(this.destDir);
             }
 
-            await downloadAndInstall(FULL_FILE, this.destDir, { name: 'Full', sourceDir: '.' }, updateInfo.distributionManifest.fullHash);
+            await downloadAndInstall(FULL_FILE, this.destDir, {
+                name: 'Full',
+                sourceDir: '.',
+            }, updateInfo.distributionManifest.fullHash, updateInfo.distributionManifest.fullHash);
             return done({ ...updateInfo.distributionManifest, source: this.source });
         }
 
@@ -441,7 +450,10 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 }
             });
 
-            await downloadAndInstall(BASE_FILE, this.destDir, { name: 'Base', sourceDir: '.' }, updateInfo.distributionManifest.base.hash);
+            await downloadAndInstall(BASE_FILE, this.destDir, {
+                name: 'Base',
+                sourceDir: '.',
+            }, updateInfo.distributionManifest.base.hash, updateInfo.distributionManifest.fullHash);
             newInstallManifest.base = updateInfo.distributionManifest.base;
         } else {
             console.log('No base update needed');
@@ -474,6 +486,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 path.join(this.destDir, module.sourceDir),
                 module,
                 newModule.hash,
+                updateInfo.distributionManifest.fullHash,
             );
             newInstallManifest.modules.push(newModule);
         }
