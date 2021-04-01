@@ -356,6 +356,9 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 } catch (e) {
                     console.error(e);
                     retryCount++;
+                    if (signal.aborted) {
+                        return;
+                    }
 
                     console.error('Retrying in', 2 ** retryCount, 'seconds');
                     this.emit('retryScheduled', module, retryCount, 2 ** retryCount);
