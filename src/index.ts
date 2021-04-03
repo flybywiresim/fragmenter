@@ -485,9 +485,9 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             const newModule = updateInfo.distributionManifest.modules.find((m) => m.name === module.name);
             console.log('Installing new module', newModule);
             await downloadAndInstall(
-                `${module.name}.zip`,
-                path.join(this.destDir, module.sourceDir),
-                module,
+                `${newModule.name}.zip`,
+                path.join(this.destDir, newModule.sourceDir),
+                newModule,
                 newModule.hash,
                 updateInfo.distributionManifest.fullHash,
             );
