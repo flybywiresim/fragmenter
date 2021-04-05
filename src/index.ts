@@ -288,6 +288,14 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             let url = urljoin(this.source, file);
             url += `?moduleHash=${crc.substr(0, 7)}&fullHash=${fullCrc.substr(0, 7)}`;
 
+            if (retryCount) {
+                url += `&retry=${retryCount}`;
+            }
+
+            if (options?.forceCacheBust) {
+                url += `&forcedBust=${options.forceCacheBust}`;
+            }
+
             if (retryCount || options?.forceCacheBust) {
                 url += `&cache=${Math.random() * 999999999}`;
             }
