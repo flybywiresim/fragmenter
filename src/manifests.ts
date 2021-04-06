@@ -47,4 +47,5 @@ export interface UpdateInfo {
     updatedModules: DistributionModule[];
 
     distributionManifest: DistributionManifest;
+    existingManifest?: InstallManifest;
 }

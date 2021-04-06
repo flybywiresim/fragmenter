@@ -203,6 +203,7 @@ export const needsUpdate = async (source: string, destDir: string, options?: Nee
         isFreshInstall: false,
         baseChanged: false,
         distributionManifest: distribution,
+        existingManifest: undefined,
 
         addedModules: [],
         removedModules: [],
@@ -211,6 +212,7 @@ export const needsUpdate = async (source: string, destDir: string, options?: Nee
 
     if (fs.existsSync(installManifestPath)) {
         existingInstall = await fs.readJSON(installManifestPath);
+        updateInfo.existingManifest = existingInstall;
         console.log('Existing install', existingInstall);
     } else {
         console.log('No existing install found. Update needed.');
@@ -409,8 +411,14 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         );
         console.log('Update info', updateInfo);
 
+        const allUpdated = updateInfo.updatedModules.length + updateInfo.removedModules.length
+            === updateInfo.existingManifest?.modules.length;
+        if (allUpdated) {
+            console.log('All modules scheduled for updating');
+        }
+
         // Do fresh install using the full zip file if needed
-        if (updateInfo.isFreshInstall || options?.forceFreshInstall) {
+        if (updateInfo.isFreshInstall || options?.forceFreshInstall || allUpdated) {
             console.log('Performing fresh install');
             this.emit('fullDownload');
 
