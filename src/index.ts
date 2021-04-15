@@ -367,7 +367,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                     console.error(e);
                     retryCount++;
                     if (signal.aborted) {
-                        return;
+                        throw new Error('User aborted');
                     }
 
                     console.error('[FRAGMENT] Retrying in', 2 ** retryCount, 'seconds');
