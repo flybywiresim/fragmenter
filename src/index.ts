@@ -61,17 +61,17 @@ export const pack = async (buildManifest: BuildManifest): Promise<DistributionMa
     const generateHashFromPaths = (absolutePaths: string[], baseDir: string): string => hasha(absolutePaths.map((p) => hasha(path.basename(p) + generateHashFromPath(p, baseDir))).join(''));
 
     const zip = async (sourcePath: string, zipDest: string): Promise<string> => {
-        console.log('Calculating CRC', { source: sourcePath, dest: zipDest });
+        console.log('[FRAGMENT] Calculating CRC', { source: sourcePath, dest: zipDest });
         const filesInModule = readRecurse(sourcePath).map((i) => path.resolve(sourcePath, i));
 
         const crcInfo: CrcInfo = { hash: generateHashFromPaths(filesInModule, sourcePath) };
         await fs.writeJSON(path.join(sourcePath, SINGLE_MODULE_MANIFEST), crcInfo);
 
-        console.log('Creating ZIP', { source: sourcePath, dest: zipDest });
+        console.log('[FRAGMENT] Creating ZIP', { source: sourcePath, dest: zipDest });
         const zip = new AdmZip();
         zip.addLocalFolder(sourcePath);
         zip.writeZip(zipDest);
-        console.log('Done writing zip', zipDest);
+        console.log('[FRAGMENT] Done writing zip', zipDest);
 
         return crcInfo.hash;
     };
@@ -138,11 +138,11 @@ export const pack = async (buildManifest: BuildManifest): Promise<DistributionMa
         };
 
         // Create full zip
-        console.log('Creating full ZIP');
+        console.log('[FRAGMENT] Creating full ZIP');
         distributionManifest.fullHash = await zip(tempDir, path.join(buildManifest.outDir, FULL_FILE));
 
         // Zip Modules
-        console.log('Creating module ZIPs');
+        console.log('[FRAGMENT] Creating module ZIPs');
         for (const module of buildManifest.modules) {
             const sourcePath = path.join(tempDir, module.sourceDir);
             const zipDest = path.join(buildManifest.outDir, `${module.name}.zip`);
@@ -155,7 +155,7 @@ export const pack = async (buildManifest: BuildManifest): Promise<DistributionMa
         }
 
         // Zip the rest
-        console.log('Creating base ZIP');
+        console.log('[FRAGMENT] Creating base ZIP');
         distributionManifest.base.files = readRecurse(tempDir).map(toUnixPath);
         const zipDest = path.join(buildManifest.outDir, BASE_FILE);
         distributionManifest.base.hash = await zipAndDelete(tempDir, zipDest);
@@ -196,7 +196,7 @@ export const needsUpdate = async (source: string, destDir: string, options?: Nee
         url += `?cache=${Math.random() * 999999999}`;
     }
 
-    console.log('Downloading module info from', url);
+    console.log('[FRAGMENT] Downloading module info from', url);
     const distribution: DistributionManifest = (await fetch(url).then((response) => response.json()));
     const updateInfo: UpdateInfo = {
         needsUpdate: false,
@@ -213,9 +213,9 @@ export const needsUpdate = async (source: string, destDir: string, options?: Nee
     if (fs.existsSync(installManifestPath)) {
         existingInstall = await fs.readJSON(installManifestPath);
         updateInfo.existingManifest = existingInstall;
-        console.log('Existing install', existingInstall);
+        console.log('[FRAGMENT] Existing install', existingInstall);
     } else {
-        console.log('No existing install found. Update needed.');
+        console.log('[FRAGMENT] No existing install found. Update needed.');
         updateInfo.needsUpdate = true;
         updateInfo.isFreshInstall = true;
         updateInfo.addedModules = distribution.modules;
@@ -224,7 +224,7 @@ export const needsUpdate = async (source: string, destDir: string, options?: Nee
     }
 
     if (existingInstall.base.hash !== distribution.base.hash) {
-        console.log('Base CRC does not match. Update needed.');
+        console.log('[FRAGMENT] Base CRC does not match. Update needed.');
         updateInfo.needsUpdate = true;
         updateInfo.baseChanged = true;
     }
@@ -271,22 +271,22 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
      */
     public async install(signal: AbortSignal, options?: InstallOptions): Promise<InstallInfo> {
         const validateCrc = (targetCrc: string, zipFile: AdmZip): boolean => {
-            console.log('Validating file CRC');
+            console.log('[FRAGMENT] Validating file CRC');
             const moduleFile: CrcInfo = JSON.parse(zipFile.readAsText(SINGLE_MODULE_MANIFEST));
-            console.log('CRC should be', targetCrc, 'and is', moduleFile.hash);
+            console.log('[FRAGMENT] CRC should be', targetCrc, 'and is', moduleFile.hash);
 
             return targetCrc === moduleFile.hash;
         };
 
         const validateCrcOrThrow = (targetCrc: string, zipFile: AdmZip): void => {
             if (!validateCrc(targetCrc, zipFile)) {
-                console.log('CRC wasn\'t correct');
+                console.log('[FRAGMENT] CRC wasn\'t correct');
                 throw new Error('Invalid CRC');
             }
         };
 
         const downloadFile = async (file: string, module: Module, retryCount: number, crc: string, fullCrc: string): Promise<Buffer> => {
-            console.log('Downloading file', file);
+            console.log('[FRAGMENT] Downloading file', file);
             let url = urljoin(this.source, file);
             url += `?moduleHash=${crc.substr(0, 7)}&fullHash=${fullCrc.substr(0, 7)}`;
 
@@ -302,7 +302,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 url += `&cache=${Math.random() * 999999999}`;
             }
 
-            console.log('Downloading from', url);
+            console.log('[FRAGMENT] Downloading from', url);
             const response = await fetch(url, { signal });
             const reader = response.body.getReader();
             const contentLength = +response.headers.get('Content-Length');
@@ -335,7 +335,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 position += chunk.length;
             }
 
-            console.log('Finished downloading file', file);
+            console.log('[FRAGMENT] Finished downloading file', file);
             return Buffer.from(chunksAll);
         };
 
@@ -351,17 +351,17 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                     const zipFile = new AdmZip(loadedFile);
 
                     validateCrcOrThrow(crc, zipFile);
-                    console.log('CRC was correct');
+                    console.log('[FRAGMENT] CRC was correct');
 
                     if (signal.aborted) {
                         return;
                     }
 
-                    console.log('Extracting ZIP to', destDir);
+                    console.log('[FRAGMENT] Extracting ZIP to', destDir);
                     this.emit('unzipStarted', module);
                     await util.promisify(zipFile.extractAllToAsync)(destDir, false);
                     this.emit('unzipFinished', module);
-                    console.log('Finished extracting ZIP to', destDir);
+                    console.log('[FRAGMENT] Finished extracting ZIP to', destDir);
                     return;
                 } catch (e) {
                     console.error(e);
@@ -370,7 +370,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                         return;
                     }
 
-                    console.error('Retrying in', 2 ** retryCount, 'seconds');
+                    console.error('[FRAGMENT] Retrying in', 2 ** retryCount, 'seconds');
                     this.emit('retryScheduled', module, retryCount, 2 ** retryCount);
                     // eslint-disable-next-line no-loop-func
                     await new Promise((r) => setTimeout(r, (2 ** retryCount) * 1_000));
@@ -403,27 +403,27 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         }
 
         // Get modules to update
-        console.log('Finding modules to update');
+        console.log('[FRAGMENT] Finding modules to update');
         const updateInfo = await needsUpdate(
             this.source,
             this.destDir,
             { forceCacheBust: options?.forceCacheBust || options?.forceManifestCacheBust },
         );
-        console.log('Update info', updateInfo);
+        console.log('[FRAGMENT] Update info', updateInfo);
 
         const allUpdated = updateInfo.updatedModules.length + updateInfo.removedModules.length
             === updateInfo.existingManifest?.modules.length;
         if (allUpdated) {
-            console.log('All modules scheduled for updating');
+            console.log('[FRAGMENT] All modules scheduled for updating');
         }
 
         // Do fresh install using the full zip file if needed
         if (updateInfo.isFreshInstall || options?.forceFreshInstall || allUpdated) {
-            console.log('Performing fresh install');
+            console.log('[FRAGMENT] Performing fresh install');
             this.emit('fullDownload');
 
             if (fs.existsSync(this.destDir)) {
-                console.log('Cleaning destination directory', this.destDir);
+                console.log('[FRAGMENT] Cleaning destination directory', this.destDir);
                 fs.rmdirSync(this.destDir, { recursive: true });
                 fs.mkdirSync(this.destDir);
             }
@@ -438,11 +438,11 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         // Get existing manifest
         const installManifestPath = path.join(this.destDir, INSTALL_MANIFEST);
         const oldInstallManifest: InstallManifest = await fs.readJSON(installManifestPath);
-        console.log('Found existing manifest', oldInstallManifest);
+        console.log('[FRAGMENT] Found existing manifest', oldInstallManifest);
 
         // Exit when no update is needed
         if (!updateInfo.needsUpdate) {
-            console.log('No update needed');
+            console.log('[FRAGMENT] No update needed');
             return {
                 changed: false,
                 manifest: oldInstallManifest,
@@ -461,7 +461,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
         // Delete all old base files and install new base files
         if (updateInfo.baseChanged) {
-            console.log('Updating base files');
+            console.log('[FRAGMENT] Updating base files');
             oldInstallManifest.base.files.forEach((file) => {
                 const fullPath = path.join(this.destDir, file);
                 if (fs.existsSync(fullPath)) {
@@ -475,31 +475,31 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             }, updateInfo.distributionManifest.base.hash, updateInfo.distributionManifest.fullHash);
             newInstallManifest.base = updateInfo.distributionManifest.base;
         } else {
-            console.log('No base update needed');
+            console.log('[FRAGMENT] No base update needed');
             newInstallManifest.base = oldInstallManifest.base;
         }
 
         newInstallManifest.modules = oldInstallManifest.modules;
 
         // Delete removed and updated modules
-        console.log('Removing changed and removed modules', [...updateInfo.removedModules, ...updateInfo.updatedModules]);
+        console.log('[FRAGMENT] Removing changed and removed modules', [...updateInfo.removedModules, ...updateInfo.updatedModules]);
         for (const module of [...updateInfo.removedModules, ...updateInfo.updatedModules]) {
-            console.log('Removing module', module);
+            console.log('[FRAGMENT] Removing module', module);
             const fullPath = path.join(this.destDir, module.sourceDir);
             if (fs.existsSync(fullPath)) {
                 fs.rmdirSync(fullPath, { recursive: true });
-                console.log('Removed module', module);
+                console.log('[FRAGMENT] Removed module', module);
             } else {
-                console.warn('Module', module, 'marked for removal not found');
+                console.warn('[FRAGMENT] Module', module, 'marked for removal not found');
             }
             newInstallManifest.modules.splice(newInstallManifest.modules.findIndex((m) => m.name === module.name), 1);
         }
 
         // Install updated and added modules
-        console.log('Installing changed and added modules', [...updateInfo.updatedModules, ...updateInfo.addedModules]);
+        console.log('[FRAGMENT] Installing changed and added modules', [...updateInfo.updatedModules, ...updateInfo.addedModules]);
         for (const module of [...updateInfo.updatedModules, ...updateInfo.addedModules]) {
             const newModule = updateInfo.distributionManifest.modules.find((m) => m.name === module.name);
-            console.log('Installing new module', newModule);
+            console.log('[FRAGMENT] Installing new module', newModule);
             await downloadAndInstall(
                 `${newModule.name}.zip`,
                 path.join(this.destDir, newModule.sourceDir),
