@@ -49,3 +49,22 @@ export interface UpdateInfo {
     distributionManifest: DistributionManifest;
     existingManifest?: InstallManifest;
 }
+
+/**
+ * Download progress for a single zip file.
+ */
+export interface DownloadProgress {
+    total: number;
+    loaded: number;
+    percent: number;
+}
+
+export type InstallOptions = Partial<{
+    forceFreshInstall: boolean,
+    forceCacheBust: boolean,
+    forceManifestCacheBust: boolean,
+}>;
+
+export interface NeedsUpdateOptions {
+    forceCacheBust: boolean,
+}
