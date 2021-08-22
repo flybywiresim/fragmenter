@@ -1,3 +1,5 @@
+'use strict';
+
 import resolve from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
 import typescript from 'rollup-plugin-typescript2';
@@ -11,18 +13,21 @@ export default {
         {
             file: packageJson.main,
             format: 'cjs',
-            sourcemap: true
+            sourcemap: true,
         },
         {
             file: packageJson.module,
             format: 'esm',
-            sourcemap: true
-        }
+            sourcemap: true,
+        },
     ],
     plugins: [
         resolve(),
         json(),
         commonjs(),
-        typescript({ useTsconfigDeclarationDir: true }),
-    ]
+        typescript({
+            useTsconfigDeclarationDir: true,
+            exclude: ['**/*.test.ts', '**/*.spec.ts'],
+        }),
+    ],
 };
