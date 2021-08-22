@@ -20,9 +20,15 @@
 
 module.exports = {
     root: true,
-    env: { browser: true },
+    env: {
+        'browser': true,
+        'jest/globals': true,
+    },
     extends: '@flybywiresim/eslint-config',
-    plugins: ['@typescript-eslint'],
+    plugins: [
+        '@typescript-eslint',
+        'jest',
+    ],
     parser: '@typescript-eslint/parser',
     parserOptions: {
         ecmaVersion: 2021,
