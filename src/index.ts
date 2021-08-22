@@ -11,33 +11,16 @@ import EventEmitter from 'events';
 import {
     BuildManifest,
     CrcInfo,
-    DistributionManifest,
+    DistributionManifest, DownloadProgress,
     InstallInfo,
-    InstallManifest,
-    Module,
+    InstallManifest, InstallOptions,
+    Module, NeedsUpdateOptions,
     UpdateInfo,
 } from './types';
 import TypedEventEmitter from './typed-emitter';
 import { BASE_FILE, FULL_FILE, INSTALL_MANIFEST, MODULES_MANIFEST, SINGLE_MODULE_MANIFEST } from './constants';
 
-/**
- * Download progress for a single zip file.
- */
-export interface DownloadProgress {
-    total: number;
-    loaded: number;
-    percent: number;
-}
-
-export type InstallOptions = Partial<{
-    forceFreshInstall: boolean,
-    forceCacheBust: boolean,
-    forceManifestCacheBust: boolean,
-}>;
-
-export interface NeedsUpdateOptions {
-    forceCacheBust: boolean,
-}
+export * from './types';
 
 /**
  * Build the individual zip files with the provided spec.
