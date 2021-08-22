@@ -68,3 +68,15 @@ export type InstallOptions = Partial<{
 export interface NeedsUpdateOptions {
     forceCacheBust: boolean,
 }
+
+export interface FragmenterInstallerEvents {
+    'error': (err: any) => void;
+    'downloadStarted': (module: Module) => void;
+    'downloadProgress': (module: Module, progress: DownloadProgress) => void;
+    'downloadFinished': (module: Module) => void;
+    'unzipStarted': (module: Module) => void;
+    'unzipFinished': (module: Module) => void;
+    'retryScheduled': (module: Module, retryCount: number, waitSeconds: number) => void;
+    'retryStarted': (module: Module, retryCount: number) => void;
+    'fullDownload': () => void;
+}
