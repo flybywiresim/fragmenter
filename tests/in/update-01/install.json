@@ -1,0 +1,97 @@
+{
+  "modules": [
+    {
+      "name": "CUSTOMIZE",
+      "sourceDir": "./CUSTOMIZE",
+      "hash": "5285ae4e3db5f0d7b0deecfe1d3db376ef4b074c5779683752216bd12d73c1f33faf07d29c001c574351acd7e1fa63e93268b4cb7b4d3960d46873bb52f7b61c"
+    },
+    {
+      "name": "Livery",
+      "sourceDir": "./SimObjects/AirPlanes/FlyByWire_A320_NEO-LIVERY",
+      "hash": "c912ca7855c755034ca0dce77a76e47525f46cd2e5d1fc82111151b0b660e736bbed9ad613eb987dc5f5f2690721b63c2b5ae5c74ecb5a50a197664aaac3df99"
+    },
+    {
+      "name": "effects",
+      "sourceDir": "./effects",
+      "hash": "90208bc9a62e3649b8fb15be6930ac3f50320871b71416d3036a6901a56a7ec9e290d4c03661a2cbec0ed783b91b84b1767b5626094039f21885b26c8bb8d53f"
+    },
+    {
+      "name": "MarketplaceData",
+      "sourceDir": "./MarketplaceData",
+      "hash": "1943e6ce047049523857f799c00556710f3c78d8212007c396bfe3cf785d782d8399929ec7942de49a51947dfc979254f5189c03634e0eb1992809898c36da02"
+    },
+    {
+      "name": "Textures",
+      "sourceDir": "./SimObjects/AirPlanes/FlyByWire_A320_NEO/TEXTURE",
+      "hash": "9d2275e5bb8b97dafaaaad2d969bd3edd4db4eaaebd62d105068f60ed2310b2550e36485ce3c4e472589022fc6b80d172c788c26a67e867d9eca4634f254a5e8"
+    },
+    {
+      "name": "html_ui",
+      "sourceDir": "./html_ui",
+      "hash": "b5b67afecfc6981d49c4a97b71b00d909425b3bd037c6e11b5843048b897ca64466476bfbd20ce43ff0dc7c2d44996bb12762bb469321445a189b1fce6690c47"
+    },
+    {
+      "name": "ModelBehaviorDefs",
+      "sourceDir": "./ModelBehaviorDefs",
+      "hash": "a6858fb90b1aa59e47dd617e29852468df7dac838963637e0325921c63e95706dd6cdabc522530e304275983b342840153e19afd02da8054ac270ccc479b8490"
+    },
+    {
+      "name": "Sound",
+      "sourceDir": "./SimObjects/AirPlanes/FlyByWire_A320_NEO/sound",
+      "hash": "7fdd4b4a5a4c0b90e3447d209a7f7bfa58308953c95d15a028d86ac860aaf071fbe0bc1da326d0dfc03c8464d802145df610d0dc3d601c50fceef3ef9ded8095"
+    },
+    {
+      "name": "Model",
+      "sourceDir": "./SimObjects/AirPlanes/FlyByWire_A320_NEO/model",
+      "hash": "fccadb421128a4dfdc261a779f7b43d318d3139517fde3b05a2e5f19ff98ea373778cf1506d10624dc4652b7e433b2c40183522d32e0d6568f50d0d4a544c155"
+    },
+    {
+      "name": "Panels",
+      "sourceDir": "./SimObjects/AirPlanes/FlyByWire_A320_NEO/panel",
+      "hash": "47e6ad7a29b84e238d123d73e0781d1887f6bd36a70bfb585a1c26035a643d3efd9af2ba03739f959e1a43884cb14bcb2f1f8a4f12992abf33f610c00a6a16d2"
+    }
+  ],
+  "base": {
+    "hash": "d5daa0c1a723496883e0f47a2516bf977a96dbb4b03e5506bea1fe821057ff97a0f3730775758b88141169fc18e5e3bc31f6e64fee44237a3890ee27de14f122",
+    "files": [
+      "Business.json",
+      "SimObjects/AirPlanes/FlyByWire_A320_NEO/Checklist/Airbus_A320neo_Checklist.xml",
+      "SimObjects/AirPlanes/FlyByWire_A320_NEO/Checklist/Library.xml",
+      "SimObjects/AirPlanes/FlyByWire_A320_NEO/Climb.flt",
+      "SimObjects/AirPlanes/FlyByWire_A320_NEO/Cockpit.loc",
+      "SimObjects/AirPlanes/FlyByWire_A320_NEO/Notice.txt",
+      "SimObjects/AirPlanes/FlyByWire_A320_NEO/ai.cfg",
+      "SimObjects/AirPlanes/FlyByWire_A320_NEO/aircraft.cfg",
+      "SimObjects/AirPlanes/FlyByWire_A320_NEO/aircraft.loc",
+      "SimObjects/AirPlanes/FlyByWire_A320_NEO/approach.FLT",
+      "SimObjects/AirPlanes/FlyByWire_A320_NEO/apron.FLT",
+      "SimObjects/AirPlanes/FlyByWire_A320_NEO/cameras.cfg",
+      "SimObjects/AirPlanes/FlyByWire_A320_NEO/cockpit.cfg",
+      "SimObjects/AirPlanes/FlyByWire_A320_NEO/cruise.FLT",
+      "SimObjects/AirPlanes/FlyByWire_A320_NEO/engines.cfg",
+      "SimObjects/AirPlanes/FlyByWire_A320_NEO/final.FLT",
+      "SimObjects/AirPlanes/FlyByWire_A320_NEO/flight_model.cfg",
+      "SimObjects/AirPlanes/FlyByWire_A320_NEO/gameplay.cfg",
+      "SimObjects/AirPlanes/FlyByWire_A320_NEO/hangar.flt",
+      "SimObjects/AirPlanes/FlyByWire_A320_NEO/runway.FLT",
+      "SimObjects/AirPlanes/FlyByWire_A320_NEO/systems.cfg",
+      "SimObjects/AirPlanes/FlyByWire_A320_NEO/target_performance.cfg",
+      "SimObjects/AirPlanes/FlyByWire_A320_NEO/taxi.flt",
+      "build_info.json",
+      "de-DE.locPak",
+      "en-US.locPak",
+      "es-ES.locPak",
+      "fr-FR.locPak",
+      "it-IT.locPak",
+      "layout.json",
+      "manifest.json",
+      "module.json",
+      "pl-PL.locPak",
+      "pt-BR.locPak",
+      "ru-RU.locPak",
+      "zh-CN.locPak"
+    ]
+  },
+  "fullHash": "bc00f6b32a8518a4b7441126f3341ec202169d39e2f1a0400b0e3e1a3eb8755ca229a3028c4c133086a9d8ac9c7a8dac88c9e159147b77f08240c304641057b4",
+  "source": "https://cdn.flybywiresim.com/addons/a32nx/master"
+}
