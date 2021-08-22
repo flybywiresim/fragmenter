@@ -18,6 +18,7 @@ import {
     UpdateInfo,
 } from './manifests';
 import TypedEventEmitter from './typed-emitter';
+import { BASE_FILE, FULL_FILE, INSTALL_MANIFEST, MODULES_MANIFEST, SINGLE_MODULE_MANIFEST } from './constants';
 
 /**
  * Download progress for a single zip file.
@@ -37,12 +38,6 @@ export type InstallOptions = Partial<{
 export interface NeedsUpdateOptions {
     forceCacheBust: boolean,
 }
-
-const SINGLE_MODULE_MANIFEST = 'module.json';
-const MODULES_MANIFEST = 'modules.json';
-const INSTALL_MANIFEST = 'install.json';
-const FULL_FILE = 'full.zip';
-const BASE_FILE = 'base.zip';
 
 /**
  * Build the individual zip files with the provided spec.
