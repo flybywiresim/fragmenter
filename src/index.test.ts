@@ -2,8 +2,8 @@ import { pack } from './index';
 
 test('Pack', async () => {
     const result = await pack({
-        baseDir: './test-data/pack-01',
-        outDir: './test-data/out/pack-01',
+        baseDir: './tests/in/pack-01',
+        outDir: './tests/out/pack-01',
         modules: [{
             name: 'a',
             sourceDir: './a',

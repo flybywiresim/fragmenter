@@ -3,4 +3,4 @@ dist/
 node_modules/
 test/
 .coverage/
-test-data/out/
+tests/out/
