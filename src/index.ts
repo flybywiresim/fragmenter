@@ -16,7 +16,7 @@ import {
     InstallManifest,
     Module,
     UpdateInfo,
-} from './manifests';
+} from './types';
 import TypedEventEmitter from './typed-emitter';
 import { BASE_FILE, FULL_FILE, INSTALL_MANIFEST, MODULES_MANIFEST, SINGLE_MODULE_MANIFEST } from './constants';
 
