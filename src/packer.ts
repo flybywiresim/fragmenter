@@ -80,6 +80,14 @@ export const pack = async (buildManifest: BuildManifest): Promise<DistributionMa
         });
     });
 
+    const moduleNames: string[] = [''];
+    buildManifest.modules.forEach((module) => {
+        if (moduleNames.includes(module.name)) {
+            throw new Error(`Module name '${module.name}' is set for more than one module. Each module must have a unique name!`);
+        }
+        moduleNames.push(module.name);
+    });
+
     if (!fs.existsSync(buildManifest.baseDir)) {
         throw new Error('Base directory does not exist');
     }
