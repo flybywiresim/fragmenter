@@ -133,8 +133,8 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 }
             }
 
-            this.emit('error', `Error while downloading ${module.name} module`);
-            throw new Error(`Error while downloading ${module.name} module`);
+            this.emit('error', `[FRAGMENT] Error while downloading ${module.name} module`);
+            throw new Error(`[FRAGMENT] Error while downloading ${module.name} module`);
         };
 
         const done = (manifest: InstallManifest): InstallInfo => {
@@ -173,7 +173,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         }
 
         // Do fresh install using the full zip file if needed
-        if (updateInfo.isFreshInstall || options?.forceFreshInstall || allUpdated) {
+        const fullInstall = async () => {
             console.log('[FRAGMENT] Performing fresh install');
             this.emit('fullDownload');
 
@@ -188,6 +188,10 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 sourceDir: '.',
             }, updateInfo.distributionManifest.fullHash, updateInfo.distributionManifest.fullHash);
             return done({ ...updateInfo.distributionManifest, source: this.source });
+        };
+
+        if (updateInfo.isFreshInstall || options?.forceFreshInstall || allUpdated) {
+            return fullInstall();
         }
 
         // Get existing manifest
@@ -216,19 +220,27 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
         // Delete all old base files and install new base files
         if (updateInfo.baseChanged) {
-            console.log('[FRAGMENT] Updating base files');
-            oldInstallManifest.base.files.forEach((file) => {
-                const fullPath = path.join(this.destDir, file);
-                if (fs.existsSync(fullPath)) {
-                    fs.removeSync(fullPath);
-                }
-            });
+            try {
+                console.log('[FRAGMENT] Updating base files');
+                oldInstallManifest.base.files.forEach((file) => {
+                    const fullPath = path.join(this.destDir, file);
+                    if (fs.existsSync(fullPath)) {
+                        fs.removeSync(fullPath);
+                    }
+                });
 
-            await downloadAndInstall(BASE_FILE, this.destDir, {
-                name: 'Base',
-                sourceDir: '.',
-            }, updateInfo.distributionManifest.base.hash, updateInfo.distributionManifest.fullHash);
-            newInstallManifest.base = updateInfo.distributionManifest.base;
+                await downloadAndInstall(BASE_FILE, this.destDir, {
+                    name: 'Base',
+                    sourceDir: '.',
+                }, updateInfo.distributionManifest.base.hash, updateInfo.distributionManifest.fullHash);
+                newInstallManifest.base = updateInfo.distributionManifest.base;
+            } catch (error) {
+                if (error.message.includes('[FRAGMENT] Error while downloading') && !options.disableFallbackToFull) {
+                    console.error(error.message);
+                    return fullInstall();
+                }
+                throw new Error(error.message);
+            }
         } else {
             console.log('[FRAGMENT] No base update needed');
             newInstallManifest.base = oldInstallManifest.base;
@@ -251,21 +263,29 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         }
 
         // Install updated and added modules
-        console.log('[FRAGMENT] Installing changed and added modules', [...updateInfo.updatedModules, ...updateInfo.addedModules]);
-        for (const module of [...updateInfo.updatedModules, ...updateInfo.addedModules]) {
-            const newModule = updateInfo.distributionManifest.modules.find((m) => m.name === module.name);
-            console.log('[FRAGMENT] Installing new module', newModule);
-            await downloadAndInstall(
-                `${newModule.name}.zip`,
-                path.join(this.destDir, newModule.sourceDir),
-                newModule,
-                newModule.hash,
-                updateInfo.distributionManifest.fullHash,
-            );
-            newInstallManifest.modules.push(newModule);
-        }
+        try {
+            console.log('[FRAGMENT] Installing changed and added modules', [...updateInfo.updatedModules, ...updateInfo.addedModules]);
+            for (const module of [...updateInfo.updatedModules, ...updateInfo.addedModules]) {
+                const newModule = updateInfo.distributionManifest.modules.find((m) => m.name === module.name);
+                console.log('[FRAGMENT] Installing new module', newModule);
+                await downloadAndInstall(
+                    `${newModule.name}.zip`,
+                    path.join(this.destDir, newModule.sourceDir),
+                    newModule,
+                    newModule.hash,
+                    updateInfo.distributionManifest.fullHash,
+                );
+                newInstallManifest.modules.push(newModule);
+            }
 
-        newInstallManifest.fullHash = updateInfo.distributionManifest.fullHash;
-        return done(newInstallManifest);
+            newInstallManifest.fullHash = updateInfo.distributionManifest.fullHash;
+            return done(newInstallManifest);
+        } catch (error) {
+            if (error.message.includes('[FRAGMENT] Error while downloading') && !options.disableFallbackToFull) {
+                console.error(error.message);
+                return fullInstall();
+            }
+            throw new Error(error.message);
+        }
     }
 }

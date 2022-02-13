@@ -63,6 +63,7 @@ export type InstallOptions = Partial<{
     forceFreshInstall: boolean,
     forceCacheBust: boolean,
     forceManifestCacheBust: boolean,
+    disableFallbackToFull?: boolean,
 }>;
 
 export interface NeedsUpdateOptions {
