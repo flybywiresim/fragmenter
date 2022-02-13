@@ -7,7 +7,7 @@ on:
       - reopened
       - ready_for_review
     branches:
-      - master
+      - main
 jobs:
   lint:
     runs-on: ubuntu-latest
