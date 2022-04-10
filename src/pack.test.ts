@@ -16,8 +16,8 @@ test('Pack', async () => {
         }],
     });
 
-    expect(result.fullHash).toBe('454318a74acf49697c8e0deb4dd35fab94ae2273332073bb48039afb92f21f8c11b46e246dcd0762fcd7573c65baf6a5ea9368e7aaa9a54fb71ab17c05ee4446');
-    expect(result.base.hash).toBe('c0a7e61ba946b06c58287f913ec159dd22a96ace006d917df4c9dfeb000f9664545ed8211952103051ab5dea82ff87fa4797ec717f117a592c9e3008525c5b59');
+    expect(result.fullHash).toBe('7a8192768029ad9bd0aff064df12568aeea22573fe12eda88898687232e8cefdb759bf2cbd7795fa5840be1c6886025b86d621c76869df996a18260c535c761c');
+    expect(result.base.hash).toBe('c66ac1e5c010060c460d72ee94034f0fff3dffc9ef762502611876fcba444c9d7b5a761952a906175db7e96243b8d93651a0468d3e768709eb7895f36c35ad67');
     expect(result.base.files).toEqual(['a.json', 'module.json']);
     expect(result.modules).toHaveLength(3);
 });
