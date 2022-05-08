@@ -23,5 +23,5 @@ test('Pack', async () => {
     expect(result.base.hash).toBe('c66ac1e5c010060c460d72ee94034f0fff3dffc9ef762502611876fcba444c9d7b5a761952a906175db7e96243b8d93651a0468d3e768709eb7895f36c35ad67');
     expect(result.base.files).toEqual(['a.json', 'module.json']);
     expect(result.modules).toHaveLength(3);
-    expect(result.metadata).toEqual(expect.objectContaining({"version": "0.8.0"}))
+    expect(result.metadata).toEqual(expect.objectContaining({"version": "0.8.0"}));
 });
