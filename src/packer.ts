@@ -105,6 +105,7 @@ export const pack = async (buildManifest: BuildManifest): Promise<DistributionMa
         fs.copySync(buildManifest.baseDir, tempDir);
 
         const distributionManifest: DistributionManifest = {
+            metadata: buildManifest.metadata,
             modules: [],
             base: {
                 hash: '',
