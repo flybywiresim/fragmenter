@@ -22,7 +22,7 @@ export const pack = async (buildManifest: BuildManifest): Promise<DistributionMa
         if (!fs.existsSync(absolutePath)) return undefined;
 
         const stats = fs.statSync(absolutePath);
-        if (stats.isFile()) return hasha(path.relative(absolutePath, baseDir).replaceAll('\\', '/') + hasha.fromFileSync(absolutePath));
+        if (stats.isFile()) return hasha(path.relative(absolutePath, baseDir).replace(/\\/g, '/') + hasha.fromFileSync(absolutePath));
         return generateHashFromPaths(fs.readdirSync(absolutePath).map((i) => path.join(absolutePath, i)), baseDir);
     };
 
