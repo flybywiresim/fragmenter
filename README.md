@@ -66,7 +66,7 @@ const buildManifest = {
 ### 3. Use the buildManifest within the `pack()` function
 
 ```ts
-fragmenter.pack(buildModules);
+fragmenter.pack(buildManifest);
 ```
 `pack()` is an async function which builds the modules. It's promised return value is the DistributionManifest Object (modules.json). The only attribute it expects is the buildModules object.
 
