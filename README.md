@@ -95,7 +95,7 @@ fragmenter.pack({
 run fragmenter to build your modules
 
 ```shell
-node fragment.js
+$ node fragment.js
 ```
 ## How to host fragmenter modules
 
