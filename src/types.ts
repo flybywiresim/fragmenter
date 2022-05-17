@@ -27,6 +27,7 @@ export interface InstallInfo {
 export interface Module {
     name: string;
     sourceDir: string;
+    optional?: boolean;
 }
 
 export interface DistributionModule extends Module {

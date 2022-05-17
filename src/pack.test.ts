@@ -13,6 +13,7 @@ test('Pack', async () => {
         }, {
             name: 'c',
             sourceDir: './c',
+            optional: true,
         }],
     });
 
