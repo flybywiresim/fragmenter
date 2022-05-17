@@ -6,9 +6,11 @@
 
 ## Modules / fragments
 
+Modules are used to minimize the amount of files unnecessarily redownloaded during an update.
 A module is the zipped content of it's relative `sourceDir` specified in the [`buildManifest`](#2-create-a-buildmanifest). It also includes a `module.json` file which contains the hash of this specific module in order to be able to check for mismatches between the downloaded file and [`modules.json`](#the-modulesjson-file) on the server. The full module includes all modules and allows a faster initial installation. The base module includes every file of a package which is not part of another module.
 
 ## Installation
+Requires [Node.js v16](https://nodejs.org/en/download/) or higher to be installed.
 
 Install the library using npm:
 ```shell
@@ -16,7 +18,7 @@ $ npm install --save @flybywiresim/fragmenter
 ```
 ## How to use fragmenter to pack files
 
-### 1. Create a .js file and import fragmenter
+### 1. Create a fragment.js file and import fragmenter
 ```ts
 const fragmenter = require('@flybywiresim/fragmenter');
 ```
@@ -26,7 +28,7 @@ The buildManifest has the following attributes:
 
 - `baseDir: string` 
 
-    input directory for files before packing / directory of the baseModule (everything which is not included in another module)
+    input directory for files before packing / directory of the baseModule (everything which is not included in another module). When using relative paths, pay attention to your execution directory.
 
  - `outDir: string`
 
@@ -88,6 +90,13 @@ fragmenter.pack({
 });
 ```
 
+### 4. Build the modules
+
+run fragmenter to build your modules
+
+```shell
+node fragment.js
+```
 ## How to host fragmenter modules
 
 All files of one package located inside `outDir` need to be hosted within the same directory. Multiple packages cannot be hosted within the same directory. To allow updates, the URL requires to be consistent for all future builds (e.g. no versioning within the URL).
@@ -96,7 +105,7 @@ All files of one package located inside `outDir` need to be hosted within the sa
 
 (also reffered to as `distributionManifest`)
 
-This file is created during packing and located within your outDir. It indicates the current contents of a package. The structure of this file is similar to the buildManifest but most importantly it serves a hash value for each module. In case a module's hash in this file is different than inside the [installManifest](#-the-install.json-file) an update is required.
+This file is created during packing and located within your outDir. It indicates the current contents of a package. The structure of this file is similar to the buildManifest but most importantly it serves a hash value for each module. In case a module's hash in this file is different than inside the [`installManifest`](#the-installjson-file) an update is required.
 
 The `base` Module will have all it's contents listed by relative paths, as this module contains everything which is not included within another module.
 
