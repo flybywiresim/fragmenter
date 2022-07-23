@@ -323,7 +323,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
                 newInstallManifest.base = updateInfo.distributionManifest.base;
             } catch (error) {
-                if (error.message.includes('Error while downloading') && !options.disableFallbackToFull) {
+                if (error.message.includes('Error while downloading') && !options?.disableFallbackToFull) {
                     logError(error.message);
                     return fullInstall();
                 }
@@ -379,7 +379,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
             return done(newInstallManifest);
         } catch (error) {
-            if (error.message.includes('Error while downloading') && !options.disableFallbackToFull) {
+            if (error.message.includes('Error while downloading') && !options?.disableFallbackToFull) {
                 console.error(error.message);
                 return fullInstall();
             }
