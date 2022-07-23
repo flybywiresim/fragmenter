@@ -1,13 +1,17 @@
 import EventEmitter from 'events';
-import AdmZip from 'adm-zip';
+import { Unzip } from 'zip-lib';
+import Axios from 'axios';
 import urljoin from 'url-join';
-import util from 'util';
+import util, { promisify } from 'util';
+import stream from 'stream';
 import path from 'path';
 import fs from 'fs-extra';
+import * as os from 'os';
 import { BASE_FILE, FULL_FILE, INSTALL_MANIFEST, SINGLE_MODULE_MANIFEST } from './constants';
-import { CrcInfo, FragmenterInstallerEvents, InstallInfo, InstallManifest, InstallOptions, Module } from './types';
+import { DistributionModule, FragmenterInstallerEvents, InstallInfo, InstallManifest, InstallOptions, Module } from './types';
 import TypedEventEmitter from './typed-emitter';
-import { needsUpdate } from './checks';
+import { getLoggerSettingsFromOptions } from './log';
+import { FragmenterUpdateChecker } from './checks';
 
 export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEmitter<FragmenterInstallerEvents>) {
     /**
@@ -25,25 +29,45 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
      * @param signal Abort signal
      */
     public async install(signal: AbortSignal, options?: InstallOptions): Promise<InstallInfo> {
-        const validateCrc = (targetCrc: string, zipFile: AdmZip): boolean => {
-            console.log('[FRAGMENT] Validating file CRC');
-            const moduleFile: CrcInfo = JSON.parse(zipFile.readAsText(SINGLE_MODULE_MANIFEST));
-            console.log('[FRAGMENT] CRC should be', targetCrc, 'and is', moduleFile.hash);
+        const [useInfoConsoleLog, useWarnConsoleLog, useErrorConsoleLog] = getLoggerSettingsFromOptions(options);
 
-            return targetCrc === moduleFile.hash;
-        };
+        const tempFolder = path.join(os.tmpdir(), `fbw-fragmenter-temp-${(Math.random() * 100_000).toFixed(0)}`);
 
-        const validateCrcOrThrow = (targetCrc: string, zipFile: AdmZip): void => {
-            if (!validateCrc(targetCrc, zipFile)) {
-                console.log('[FRAGMENT] CRC wasn\'t correct');
-                throw new Error('Invalid CRC');
+        const logInfo = (module: Module | null, ...bits: any[]) => {
+            if (useInfoConsoleLog) {
+                console.log('[FRAGMENT]', ...bits);
             }
+            this.emit('logInfo', module, ...bits);
         };
 
-        const downloadFile = async (file: string, module: Module, retryCount: number, crc: string, fullCrc: string): Promise<Buffer> => {
-            console.log('[FRAGMENT] Downloading file', file);
+        const logWarn = (module: Module | null, ...bits: any[]) => {
+            if (useWarnConsoleLog) {
+                console.warn('[FRAGMENT]', ...bits);
+            }
+            this.emit('logWarn', module, ...bits);
+        };
+
+        const logError = (module: Module | null, ...bits: any[]) => {
+            if (useErrorConsoleLog) {
+                console.error('[FRAGMENT]', ...bits);
+            }
+            this.emit('logError', module, ...bits);
+        };
+
+        const validateCrc = (module: Module, targetCrc: string, actualCrc: string): boolean => {
+            logInfo(module, 'Validating file CRC');
+            logInfo(module, 'CRC should be', targetCrc, 'and is', actualCrc);
+
+            return targetCrc === actualCrc;
+        };
+
+        const getUrlStream = async (url: string) => Axios.get(url, { responseType: 'stream' });
+
+        const downloadFile = async (file: string, module: Module, retryCount: number, crc: string, fullCrc: string, tempFolder: string): Promise<string> => {
+            logInfo(module, 'Downloading file', file);
+
             let url = urljoin(this.source, file);
-            url += `?moduleHash=${crc.substr(0, 7)}&fullHash=${fullCrc.substr(0, 7)}`;
+            url += `?moduleHash=${crc.substring(0, 7)}&fullHash=${fullCrc.substring(0, 7)}`;
 
             if (retryCount) {
                 url += `&retry=${retryCount}`;
@@ -57,80 +81,111 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 url += `&cache=${Math.random() * 999999999}`;
             }
 
-            console.log('[FRAGMENT] Downloading from', url);
-            const response = await fetch(url, { signal });
-            const reader = response.body.getReader();
-            const contentLength = +response.headers.get('Content-Length');
+            logInfo(module, 'Downloading from', url);
 
-            let receivedLength = 0;
-            const chunks = [];
+            const destPath = path.join(tempFolder, file);
 
-            // eslint-disable-next-line no-constant-condition
-            while (true) {
-                const { done, value } = await reader.read();
+            const writeStream = fs.createWriteStream(destPath);
+            const readStream = await getUrlStream(url);
 
-                if (done || signal.aborted) {
-                    break;
-                }
+            await util.promisify(stream.pipeline)(readStream.data, writeStream);
 
-                chunks.push(value);
-                receivedLength += value.length;
+            logInfo(module, 'Finished downloading file', file);
 
-                this.emit('downloadProgress', module, {
-                    total: contentLength,
-                    loaded: receivedLength,
-                    percent: Math.floor((receivedLength / contentLength) * 100),
-                });
-            }
-
-            const chunksAll = new Uint8Array(receivedLength);
-            let position = 0;
-            for (const chunk of chunks) {
-                chunksAll.set(chunk, position);
-                position += chunk.length;
-            }
-
-            console.log('[FRAGMENT] Finished downloading file', file);
-            return Buffer.from(chunksAll);
+            return destPath;
         };
 
         const downloadAndInstall = async (file: string, destDir: string, module: Module, crc: string, fullCrc: string) => {
-            let retryCount = 0;
+            let loadedFilePath: string;
+            let tempExtractDir: string;
 
+            const cleanup = async () => {
+                try {
+                    // Cleanup
+                    if (fs.existsSync(loadedFilePath)) {
+                        await promisify(fs.rm)(loadedFilePath);
+                    }
+                    if (fs.existsSync(tempExtractDir)) {
+                        await promisify(fs.rm)(tempExtractDir, { recursive: true });
+                    }
+                } catch (e) {
+                    this.emit('error', '[FRAGMENT] Error while cleaning up');
+                }
+            };
+
+            let retryCount = 0;
             while (retryCount < 5 && !signal.aborted) {
                 try {
                     this.emit('downloadStarted', module);
-                    const loadedFile = await downloadFile(file, module, retryCount, crc, fullCrc);
+
+                    await fs.mkdir(tempFolder);
+
+                    loadedFilePath = await downloadFile(file, module, retryCount, crc, fullCrc, tempFolder);
+
                     this.emit('downloadFinished', module);
 
-                    const zipFile = new AdmZip(loadedFile);
-
-                    validateCrcOrThrow(crc, zipFile);
-                    console.log('[FRAGMENT] CRC was correct');
+                    if (options.useConsoleLog) {
+                        logInfo(module, 'CRC was correct');
+                    }
 
                     if (signal.aborted) {
                         return;
                     }
 
-                    console.log('[FRAGMENT] Extracting ZIP to', destDir);
+                    logInfo(module, 'Extracting ZIP to', destDir);
+
                     this.emit('unzipStarted', module);
-                    await util.promisify(zipFile.extractAllToAsync)(destDir, false);
+
+                    // Extract zip file to temp directory
+                    tempExtractDir = path.join(tempFolder, `extract-${path.parse(loadedFilePath).name}`);
+                    const unzip = new Unzip();
+                    await unzip.extract(loadedFilePath, tempExtractDir);
+
+                    // Validate the CRC
+                    const moduleJson = JSON.parse(fs.readFileSync(path.join(tempExtractDir, SINGLE_MODULE_MANIFEST)).toString()) as DistributionModule;
+                    const actualCrc = moduleJson.hash;
+
+                    if (actualCrc === undefined) {
+                        throw new Error('module.json did not contain hash');
+                    }
+
+                    if (!validateCrc(module, crc, actualCrc)) {
+                        logError(module, 'CRC wasn\'t correct');
+                        throw new Error('Invalid CRC');
+                    }
+
+                    // Copy over extracted files to destination
+                    await fs.copy(tempExtractDir, destDir);
+
                     this.emit('unzipFinished', module);
-                    console.log('[FRAGMENT] Finished extracting ZIP to', destDir);
+
+                    logInfo(module, 'Finished extracting ZIP to', destDir);
+
+                    // Cleanup after ourselves
+
+                    await cleanup();
+
                     return;
                 } catch (e) {
-                    console.error(e);
+                    logError(module, e);
                     retryCount++;
                     if (signal.aborted) {
                         throw new Error('User aborted');
                     }
 
-                    console.error('[FRAGMENT] Retrying in', 2 ** retryCount, 'seconds');
+                    logError(module, 'Retrying in', 2 ** retryCount, 'seconds');
+
                     this.emit('retryScheduled', module, retryCount, 2 ** retryCount);
+
                     // eslint-disable-next-line no-loop-func
                     await new Promise((r) => setTimeout(r, (2 ** retryCount) * 1_000));
+
                     this.emit('retryStarted', module, retryCount);
                 }
+
+                // Cleanup after ourselves
+
+                await cleanup();
             }
 
             this.emit('error', `[FRAGMENT] Error while downloading ${module.name} module`);
@@ -139,13 +194,17 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
         const done = (manifest: InstallManifest): InstallInfo => {
             const canceled = signal.aborted;
+
             if (!canceled) {
                 const manifestPath = path.join(this.destDir, INSTALL_MANIFEST);
 
-                console.log('Writing install manifest', manifest, 'to', manifestPath);
+                logInfo(null, 'Writing install manifest', manifest, 'to', manifestPath);
+
                 fs.writeJSONSync(manifestPath, manifest);
-                console.log('Finished writing install manifest', manifest, 'to', manifestPath);
+
+                logInfo(null, 'Finished writing install manifest', manifest, 'to', manifestPath);
             }
+
             return {
                 changed: !canceled,
                 manifest,
@@ -153,40 +212,50 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         };
 
         // Create destination directory
+
         if (!fs.existsSync(this.destDir)) {
             fs.mkdirSync(this.destDir, { recursive: true });
         }
 
+        logInfo(null, 'Finding modules to update');
+
         // Get modules to update
-        console.log('[FRAGMENT] Finding modules to update');
-        const updateInfo = await needsUpdate(
+
+        const updateChecker = new FragmenterUpdateChecker();
+
+        const updateInfo = await updateChecker.needsUpdate(
             this.source,
             this.destDir,
-            { forceCacheBust: options?.forceCacheBust || options?.forceManifestCacheBust },
+            { forceCacheBust: options?.forceCacheBust || options?.forceManifestCacheBust, useConsoleLog: options?.useConsoleLog ?? true },
         );
-        console.log('[FRAGMENT] Update info', updateInfo);
 
-        const allUpdated = updateInfo.updatedModules.length + updateInfo.removedModules.length
-            === updateInfo.existingManifest?.modules.length;
+        logInfo(null, 'Update info', updateInfo);
+
+        const allUpdated = updateInfo.updatedModules.length + updateInfo.removedModules.length === updateInfo.existingManifest?.modules.length;
+
         if (allUpdated) {
-            console.log('[FRAGMENT] All modules scheduled for updating');
+            logInfo(null, 'All modules scheduled for updating');
         }
 
         // Do fresh install using the full zip file if needed
         const fullInstall = async () => {
-            console.log('[FRAGMENT] Performing fresh install');
+            logInfo(null, 'Performing fresh install');
+
             this.emit('fullDownload');
 
             if (fs.existsSync(this.destDir)) {
-                console.log('[FRAGMENT] Cleaning destination directory', this.destDir);
-                fs.rmdirSync(this.destDir, { recursive: true });
-                fs.mkdirSync(this.destDir);
+                logInfo(null, 'Cleaning destination directory', this.destDir);
+
+                await promisify(fs.rm)(this.destDir, { recursive: true });
+                await promisify(fs.mkdir)(this.destDir);
             }
 
+            // TODO maybe we don't want to delete until we are sure the download went well - would need a 'staging' state of some sort
             await downloadAndInstall(FULL_FILE, this.destDir, {
                 name: 'Full',
                 sourceDir: '.',
             }, updateInfo.distributionManifest.fullHash, updateInfo.distributionManifest.fullHash);
+
             return done({ ...updateInfo.distributionManifest, source: this.source });
         };
 
@@ -197,11 +266,13 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         // Get existing manifest
         const installManifestPath = path.join(this.destDir, INSTALL_MANIFEST);
         const oldInstallManifest: InstallManifest = await fs.readJSON(installManifestPath);
-        console.log('[FRAGMENT] Found existing manifest', oldInstallManifest);
+
+        logInfo(null, 'Found existing manifest', oldInstallManifest);
 
         // Exit when no update is needed
         if (!updateInfo.needsUpdate) {
-            console.log('[FRAGMENT] No update needed');
+            logInfo(null, 'No update needed');
+
             return {
                 changed: false,
                 manifest: oldInstallManifest,
@@ -221,53 +292,64 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         // Delete all old base files and install new base files
         if (updateInfo.baseChanged) {
             try {
-                console.log('[FRAGMENT] Updating base files');
-                oldInstallManifest.base.files.forEach((file) => {
+                logInfo(null, 'Updating base files');
+
+                for (const file of oldInstallManifest.base.files) {
                     const fullPath = path.join(this.destDir, file);
                     if (fs.existsSync(fullPath)) {
                         fs.removeSync(fullPath);
                     }
-                });
+                }
 
                 await downloadAndInstall(BASE_FILE, this.destDir, {
                     name: 'Base',
                     sourceDir: '.',
                 }, updateInfo.distributionManifest.base.hash, updateInfo.distributionManifest.fullHash);
+
                 newInstallManifest.base = updateInfo.distributionManifest.base;
             } catch (error) {
-                if (error.message.includes('[FRAGMENT] Error while downloading') && !options.disableFallbackToFull) {
-                    console.error(error.message);
+                if (error.message.includes('Error while downloading') && !options.disableFallbackToFull) {
+                    logError(error.message);
                     return fullInstall();
                 }
+
                 throw new Error(error.message);
             }
         } else {
-            console.log('[FRAGMENT] No base update needed');
+            logInfo(null, 'No base update needed');
+
             newInstallManifest.base = oldInstallManifest.base;
         }
 
         newInstallManifest.modules = oldInstallManifest.modules;
 
         // Delete removed and updated modules
-        console.log('[FRAGMENT] Removing changed and removed modules', [...updateInfo.removedModules, ...updateInfo.updatedModules]);
+        logInfo(null, 'Removing changed and removed modules', [...updateInfo.removedModules, ...updateInfo.updatedModules]);
+
         for (const module of [...updateInfo.removedModules, ...updateInfo.updatedModules]) {
-            console.log('[FRAGMENT] Removing module', module);
+            logInfo(null, 'Removing module', module);
+
             const fullPath = path.join(this.destDir, module.sourceDir);
+
             if (fs.existsSync(fullPath)) {
                 fs.rmdirSync(fullPath, { recursive: true });
-                console.log('[FRAGMENT] Removed module', module);
+
+                logInfo(null, 'Removed module', module);
             } else {
-                console.warn('[FRAGMENT] Module', module, 'marked for removal not found');
+                logWarn(null, 'Module', module, 'marked for removal not found');
             }
             newInstallManifest.modules.splice(newInstallManifest.modules.findIndex((m) => m.name === module.name), 1);
         }
 
         // Install updated and added modules
         try {
-            console.log('[FRAGMENT] Installing changed and added modules', [...updateInfo.updatedModules, ...updateInfo.addedModules]);
+            logInfo(null, 'Installing changed and added modules', [...updateInfo.updatedModules, ...updateInfo.addedModules]);
+
             for (const module of [...updateInfo.updatedModules, ...updateInfo.addedModules]) {
                 const newModule = updateInfo.distributionManifest.modules.find((m) => m.name === module.name);
-                console.log('[FRAGMENT] Installing new module', newModule);
+
+                logInfo(null, 'Installing new module', newModule);
+
                 await downloadAndInstall(
                     `${newModule.name}.zip`,
                     path.join(this.destDir, newModule.sourceDir),
@@ -279,9 +361,10 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             }
 
             newInstallManifest.fullHash = updateInfo.distributionManifest.fullHash;
+
             return done(newInstallManifest);
         } catch (error) {
-            if (error.message.includes('[FRAGMENT] Error while downloading') && !options.disableFallbackToFull) {
+            if (error.message.includes('Error while downloading') && !options.disableFallbackToFull) {
                 console.error(error.message);
                 return fullInstall();
             }

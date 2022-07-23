@@ -1,5 +1,5 @@
 import fs from 'fs-extra';
-import AdmZip from 'adm-zip';
+import { Zip } from 'zip-lib';
 import path from 'path';
 // eslint-disable-next-line import/no-unresolved
 import readRecurse from 'fs-readdir-recursive';
@@ -36,11 +36,12 @@ export const pack = async (buildManifest: BuildManifest): Promise<DistributionMa
         await fs.writeJSON(path.join(sourcePath, SINGLE_MODULE_MANIFEST), crcInfo);
 
         console.log('[FRAGMENT] Creating ZIP', { source: sourcePath, dest: zipDest });
-        const zip = new AdmZip();
-        zip.addLocalFolder(sourcePath);
-        zip.writeZip(zipDest);
-        console.log('[FRAGMENT] Done writing zip', zipDest);
 
+        const zip = new Zip();
+        await zip.addFolder(sourcePath);
+        await zip.archive(zipDest);
+
+        console.log('[FRAGMENT] Done writing zip', zipDest);
         return crcInfo.hash;
     };
 
