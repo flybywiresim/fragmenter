@@ -7,12 +7,14 @@ export interface BuildManifest {
     baseDir: string;
     outDir: string;
     modules: Module[];
+    metadata?: any;
 }
 
 export interface DistributionManifest {
     modules: DistributionModule[];
     base: Base;
     fullHash: string;
+    metadata?: any;
 }
 
 export interface InstallManifest extends DistributionManifest {
