@@ -124,9 +124,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
                     this.emit('downloadFinished', module);
 
-                    if (options.useConsoleLog) {
-                        logInfo(module, 'CRC was correct');
-                    }
+                    logInfo(module, 'CRC was correct');
 
                     if (signal.aborted) {
                         return;
