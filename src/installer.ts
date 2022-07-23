@@ -61,7 +61,8 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             return targetCrc === actualCrc;
         };
 
-        const getUrlStream = async (url: string) => Axios.get(url, { responseType: 'stream' });
+        // eslint-disable-next-line no-undef
+        const getUrlStream = async (url: string) => Axios.get<NodeJS.ReadableStream>(url, { responseType: 'stream' });
 
         const downloadFile = async (file: string, module: Module, retryCount: number, crc: string, fullCrc: string, tempFolder: string): Promise<string> => {
             logInfo(module, 'Downloading file', file);
@@ -87,6 +88,22 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
             const writeStream = fs.createWriteStream(destPath);
             const readStream = await getUrlStream(url);
+
+            let loaded = 0;
+            const total = parseInt(readStream.headers['content-length']);
+
+            let lastPercent = -1;
+            readStream.data.on('data', (buffer: Buffer) => {
+                loaded += buffer.length;
+
+                const percent = Math.floor((loaded / total) * 100);
+
+                if (lastPercent !== percent) {
+                    this.emit('downloadProgress', module, { loaded, total, percent });
+                }
+
+                lastPercent = percent;
+            });
 
             await util.promisify(stream.pipeline)(readStream.data, writeStream);
 
