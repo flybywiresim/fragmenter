@@ -43,7 +43,28 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
     public async install(signal: AbortSignal, options?: InstallOptions): Promise<InstallInfo> {
         const [useInfoConsoleLog, useWarnConsoleLog, useErrorConsoleLog] = getLoggerSettingsFromOptions(options);
 
-        const tempFolder = options?.temporaryDirectory ?? path.join(os.tmpdir(), `${DEFAULT_TEMP_DIRECTORY_PREFIX}-${(Math.random() * 1_000_000).toFixed(0)}`);
+        const tempDir = options?.temporaryDirectory ?? path.join(os.tmpdir(), `${DEFAULT_TEMP_DIRECTORY_PREFIX}-${(Math.random() * 1_000_000).toFixed(0)}`);
+
+        const createTempDirIfNeeded = async () => {
+            try {
+                if (!fs.existsSync(tempDir)) {
+                    await fs.mkdir(tempDir);
+                }
+            } catch (e) {
+                this.emit('error', '[FRAGMENT] Error while creating temp directory');
+            }
+        };
+
+        const cleanupTempDir = async () => {
+            try {
+                // Cleanup
+                if (fs.existsSync(tempDir)) {
+                    await promisify(fs.rm)(tempDir, { recursive: true });
+                }
+            } catch (e) {
+                this.emit('error', '[FRAGMENT] Error while cleaning up temp directory');
+            }
+        };
 
         const logInfo = (module: Module | null, ...bits: any[]) => {
             if (useInfoConsoleLog) {
@@ -131,28 +152,12 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             let loadedFilePath: string;
             let tempExtractDir: string;
 
-            const cleanup = async () => {
-                try {
-                    // Cleanup
-                    if (fs.existsSync(loadedFilePath)) {
-                        await promisify(fs.rm)(loadedFilePath);
-                    }
-                    if (fs.existsSync(tempExtractDir)) {
-                        await promisify(fs.rm)(tempExtractDir, { recursive: true });
-                    }
-                } catch (e) {
-                    this.emit('error', '[FRAGMENT] Error while cleaning up');
-                }
-            };
-
             let retryCount = 0;
             while (retryCount < 5 && !signal.aborted) {
                 try {
                     this.emit('downloadStarted', module);
 
-                    await fs.mkdir(tempFolder);
-
-                    loadedFilePath = await downloadFile(file, module, retryCount, crc, fullCrc, tempFolder);
+                    loadedFilePath = await downloadFile(file, module, retryCount, crc, fullCrc, tempDir);
 
                     this.emit('downloadFinished', module);
 
@@ -160,12 +165,13 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                         return;
                     }
 
-                    logInfo(module, 'Extracting ZIP to', destDir);
-
                     this.emit('unzipStarted', module);
 
                     // Extract zip file to temp directory
-                    tempExtractDir = path.join(tempFolder, `extract-${path.parse(loadedFilePath).name}`);
+                    tempExtractDir = path.join(tempDir, `extract-${path.parse(loadedFilePath).name}`);
+
+                    logInfo(module, 'Extracting ZIP to', tempExtractDir);
+
                     const unzip = new Unzip();
                     await unzip.extract(loadedFilePath, tempExtractDir);
 
@@ -184,16 +190,18 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                         logInfo(module, 'CRC was correct');
                     }
 
-                    // Copy over extracted files to destination
-                    await fs.copy(tempExtractDir, destDir);
-
                     this.emit('unzipFinished', module);
+                    logInfo(module, 'Finished extracting ZIP to', tempExtractDir);
 
-                    logInfo(module, 'Finished extracting ZIP to', destDir);
+                    // Copy over extracted files to destination
 
-                    // Cleanup after ourselves
+                    this.emit('copyStarted', module);
+                    logInfo(module, 'Copying files to', destDir);
 
-                    await cleanup();
+                    await fs.copy(tempExtractDir, destDir, { recursive: true });
+
+                    this.emit('copyFinished', module);
+                    logInfo(module, 'Finished copying files to', destDir);
 
                     return;
                 } catch (e) {
@@ -212,10 +220,6 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
                     this.emit('retryStarted', module, retryCount);
                 }
-
-                // Cleanup after ourselves
-
-                await cleanup();
             }
 
             this.emit('error', `[FRAGMENT] Error while downloading ${module.name} module`);
@@ -235,17 +239,13 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 logInfo(null, 'Finished writing install manifest', manifest, 'to', manifestPath);
             }
 
+            cleanupTempDir().then();
+
             return {
                 changed: !canceled,
                 manifest,
             };
         };
-
-        // Create destination directory
-
-        if (!fs.existsSync(this.destDir)) {
-            fs.mkdirSync(this.destDir, { recursive: true });
-        }
 
         logInfo(null, 'Finding modules to update');
 
@@ -273,6 +273,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
             this.emit('fullDownload');
 
+            // TODO maybe we don't want to delete until we are sure the download went well - would need a 'staging' state of some sort (current handled in installer)
             if (fs.existsSync(this.destDir)) {
                 logInfo(null, 'Cleaning destination directory', this.destDir);
 
@@ -280,7 +281,8 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 await promisify(fs.mkdir)(this.destDir);
             }
 
-            // TODO maybe we don't want to delete until we are sure the download went well - would need a 'staging' state of some sort
+            await createTempDirIfNeeded();
+
             await downloadAndInstall(FULL_FILE, this.destDir, {
                 name: 'Full',
                 sourceDir: '.',
@@ -308,6 +310,8 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 manifest: oldInstallManifest,
             };
         }
+
+        await createTempDirIfNeeded();
 
         const newInstallManifest: InstallManifest = {
             modules: [],
