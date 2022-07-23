@@ -13,6 +13,8 @@ import TypedEventEmitter from './typed-emitter';
 import { getLoggerSettingsFromOptions } from './log';
 import { FragmenterUpdateChecker } from './checks';
 
+const DEFAULT_TEMP_DIRECTORY_PREFIX = 'fbw-fragmenter-temp';
+
 export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEmitter<FragmenterInstallerEvents>) {
     /**
      * @param source Base URL of the artifact server.
@@ -24,6 +26,16 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
     }
 
     /**
+     * Gets a download stream from an URL
+     *
+     * @param url the URL
+     */
+    private async getUrlStream(url: string) {
+        // eslint-disable-next-line no-undef
+        return Axios.get<NodeJS.ReadableStream>(url, { responseType: 'stream' });
+    }
+
+    /**
      * Install or update the newest available version.
      * @param options Advanced options for the install.
      * @param signal Abort signal
@@ -31,7 +43,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
     public async install(signal: AbortSignal, options?: InstallOptions): Promise<InstallInfo> {
         const [useInfoConsoleLog, useWarnConsoleLog, useErrorConsoleLog] = getLoggerSettingsFromOptions(options);
 
-        const tempFolder = path.join(os.tmpdir(), `fbw-fragmenter-temp-${(Math.random() * 100_000).toFixed(0)}`);
+        const tempFolder = options?.temporaryDirectory ?? path.join(os.tmpdir(), `${DEFAULT_TEMP_DIRECTORY_PREFIX}-${(Math.random() * 1_000_000).toFixed(0)}`);
 
         const logInfo = (module: Module | null, ...bits: any[]) => {
             if (useInfoConsoleLog) {
@@ -61,11 +73,8 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             return targetCrc === actualCrc;
         };
 
-        // eslint-disable-next-line no-undef
-        const getUrlStream = async (url: string) => Axios.get<NodeJS.ReadableStream>(url, { responseType: 'stream' });
-
         const downloadFile = async (file: string, module: Module, retryCount: number, crc: string, fullCrc: string, tempFolder: string): Promise<string> => {
-            logInfo(module, 'Downloading file', file);
+            logInfo(module, 'Downloading file', file, 'into temporary directory', tempFolder);
 
             let url = urljoin(this.source, file);
             url += `?moduleHash=${crc.substring(0, 7)}&fullHash=${fullCrc.substring(0, 7)}`;
@@ -87,22 +96,28 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             const destPath = path.join(tempFolder, file);
 
             const writeStream = fs.createWriteStream(destPath);
-            const readStream = await getUrlStream(url);
+            const readStream = await this.getUrlStream(url);
 
             let loaded = 0;
             const total = parseInt(readStream.headers['content-length']);
 
+            if (Number.isNaN(total)) {
+                logWarn(module, 'Server did not return Content-Length header - no download progress will be reported');
+            }
+
             let lastPercent = -1;
             readStream.data.on('data', (buffer: Buffer) => {
-                loaded += buffer.length;
+                if (!Number.isNaN(total)) {
+                    loaded += buffer.length;
 
-                const percent = Math.floor((loaded / total) * 100);
+                    const percent = Math.floor((loaded / total) * 100);
 
-                if (lastPercent !== percent) {
-                    this.emit('downloadProgress', module, { loaded, total, percent });
+                    if (lastPercent !== percent) {
+                        this.emit('downloadProgress', module, { loaded, total, percent });
+                    }
+
+                    lastPercent = percent;
                 }
-
-                lastPercent = percent;
             });
 
             await util.promisify(stream.pipeline)(readStream.data, writeStream);
@@ -141,8 +156,6 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
                     this.emit('downloadFinished', module);
 
-                    logInfo(module, 'CRC was correct');
-
                     if (signal.aborted) {
                         return;
                     }
@@ -167,6 +180,8 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                     if (!validateCrc(module, crc, actualCrc)) {
                         logError(module, 'CRC wasn\'t correct');
                         throw new Error('Invalid CRC');
+                    } else {
+                        logInfo(module, 'CRC was correct');
                     }
 
                     // Copy over extracted files to destination
