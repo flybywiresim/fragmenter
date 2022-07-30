@@ -215,6 +215,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             try {
                 this.logInfo(null, 'Updating base files');
 
+                // TODO maybe we don't want to delete until we are sure the download went well - would need a 'staging' state of some sort (current handled in installer)
                 for (const file of oldInstallManifest.base.files) {
                     const fullPath = path.join(this.destDir, file);
                     if (fs.existsSync(fullPath)) {
@@ -491,7 +492,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 }
             });
 
-            await promisify(response.data.on)('end');
+            await new Promise((resolve) => response.data.on('end', resolve));
 
             this.logInfo(module, 'Finished downloading file', file);
         }
