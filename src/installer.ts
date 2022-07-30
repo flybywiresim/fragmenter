@@ -93,7 +93,11 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         } catch (e) {
             this.cleanupTempDir().then();
 
-            throw FragmenterError.createFromError(e);
+            if (e instanceof FragmenterError) {
+                throw e;
+            } else {
+                throw FragmenterError.createFromError(e);
+            }
         }
     }
 
