@@ -1,11 +1,13 @@
 export interface Base {
     hash: string;
+    splitFileCount: number;
     files: string[];
 }
 
 export interface BuildManifest {
     baseDir: string;
     outDir: string;
+    packOptions?: PackOptions;
     modules: Module[];
 }
 
@@ -13,6 +15,7 @@ export interface DistributionManifest {
     modules: DistributionModule[];
     base: Base;
     fullHash: string;
+    fullSplitFileCount: number;
 }
 
 export interface InstallManifest extends DistributionManifest {
@@ -31,6 +34,7 @@ export interface Module {
 
 export interface DistributionModule extends Module {
     hash: string;
+    splitFileCount: number;
 }
 
 export interface CrcInfo {
@@ -57,6 +61,11 @@ export interface DownloadProgress {
     total: number;
     loaded: number;
     percent: number;
+    partTotal?: number;
+    partLoaded?: number;
+    partPercent?: number;
+    partIndex?: number;
+    numParts?: number;
 }
 
 /**
@@ -79,6 +88,24 @@ export interface BaseCommandOptions {
      * Defaults to `true`.
      */
     useConsoleLog: boolean | { info: boolean, warn: boolean, error: boolean },
+}
+
+export type PackOptions = Partial<BaseCommandOptions> & {
+    /**
+     * Specifies both the cutoff point at which to split large zip files, and the max size of each split part.
+     *
+     * -1 indicates no splitting.
+     *
+     * Defaults to `DEFAULT_SPLIT_FILE_SIZE`, which is 1 GB.
+     */
+    splitFileSize?: number,
+
+    /**
+     * Whether to keep complete files after they were split.
+     *
+     * Defaults to `true`.
+     */
+    keepCompleteModulesAfterSplit?: boolean,
 }
 
 /**

@@ -1,5 +1,7 @@
 import { pack } from './index';
 
+jest.setTimeout(720_000);
+
 test('Pack', async () => {
     const result = await pack({
         baseDir: './tests/in/pack-01',

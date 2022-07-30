@@ -21,6 +21,7 @@
 module.exports = {
     root: true,
     env: {
+        'node': true,
         'browser': true,
         'jest/globals': true,
     },
@@ -35,7 +36,6 @@ module.exports = {
         sourceType: 'script',
         requireConfigFile: false,
     },
-    settings: { 'import/resolver': { node: { extensions: ['.ts'] } } },
     overrides: [
         {
             files: ['*.mjs', '*.ts', '*.d.ts'],
@@ -47,5 +47,7 @@ module.exports = {
         'object-curly-newline': ['error', { multiline: true }],
         'no-await-in-loop': 'off',
         'no-console': 'off',
+        'import/no-unresolved': 'off',
+        'no-undef': 'off',
     },
 };

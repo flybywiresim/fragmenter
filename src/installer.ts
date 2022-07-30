@@ -1,8 +1,8 @@
 import EventEmitter from 'events';
 import { Unzip } from 'zip-lib';
-import Axios from 'axios';
+import Axios, { AxiosResponseHeaders } from 'axios';
 import urljoin from 'url-join';
-import util, { promisify } from 'util';
+import { promisify } from 'util';
 import stream from 'stream';
 import path from 'path';
 import fs from 'fs-extra';
@@ -12,234 +12,114 @@ import { DistributionModule, FragmenterInstallerEvents, InstallInfo, InstallMani
 import TypedEventEmitter from './typed-emitter';
 import { getLoggerSettingsFromOptions } from './log';
 import { FragmenterUpdateChecker } from './checks';
+import { FragmenterError, FragmenterErrorCode } from './errors';
 
 const DEFAULT_TEMP_DIRECTORY_PREFIX = 'fbw-fragmenter-temp';
 
 export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEmitter<FragmenterInstallerEvents>) {
+    private readonly tempDir: string;
+
+    private readonly logInfo: (module: Module | null, ...bits: any[]) => void;
+
+    private readonly logWarn: (module: Module | null, ...bits: any[]) => void;
+
+    private readonly logError: (module: Module | null, ...bits: any[]) => void;
+
     /**
      * @param source Base URL of the artifact server.
      * @param destDir Directory to install into.
+     * @param signal Abort signal
+     * @param options Advanced options for the install.
      */
-    constructor(private source: string, private destDir: string) {
+    constructor(
+        private source: string,
+        private destDir: string,
+        private signal: AbortSignal,
+        private options?: InstallOptions,
+    ) {
         // eslint-disable-next-line constructor-super
         super();
-    }
 
-    /**
-     * Gets a download stream from an URL
-     *
-     * @param url the URL
-     */
-    private async getUrlStream(url: string) {
-        // eslint-disable-next-line no-undef
-        return Axios.get<NodeJS.ReadableStream>(url, { responseType: 'stream' });
-    }
+        this.tempDir = this.options?.temporaryDirectory ?? path.join(os.tmpdir(), `${DEFAULT_TEMP_DIRECTORY_PREFIX}-${(Math.random() * 1_000_000).toFixed(0)}`);
 
-    /**
-     * Install or update the newest available version.
-     * @param options Advanced options for the install.
-     * @param signal Abort signal
-     */
-    public async install(signal: AbortSignal, options?: InstallOptions): Promise<InstallInfo> {
-        const [useInfoConsoleLog, useWarnConsoleLog, useErrorConsoleLog] = getLoggerSettingsFromOptions(options);
+        const [useInfoConsoleLog, useWarnConsoleLog, useErrorConsoleLog] = getLoggerSettingsFromOptions(this.options);
 
-        const tempDir = options?.temporaryDirectory ?? path.join(os.tmpdir(), `${DEFAULT_TEMP_DIRECTORY_PREFIX}-${(Math.random() * 1_000_000).toFixed(0)}`);
-
-        const createTempDirIfNeeded = async () => {
-            try {
-                if (!fs.existsSync(tempDir)) {
-                    await fs.mkdir(tempDir);
-                }
-            } catch (e) {
-                this.emit('error', '[FRAGMENT] Error while creating temp directory');
-            }
-        };
-
-        const cleanupTempDir = async () => {
-            try {
-                // Cleanup
-                if (fs.existsSync(tempDir)) {
-                    await promisify(fs.rm)(tempDir, { recursive: true });
-                }
-            } catch (e) {
-                this.emit('error', '[FRAGMENT] Error while cleaning up temp directory');
-            }
-        };
-
-        const logInfo = (module: Module | null, ...bits: any[]) => {
+        this.logInfo = (module: Module | null, ...bits: any[]) => {
             if (useInfoConsoleLog) {
                 console.log('[FRAGMENT]', ...bits);
             }
             this.emit('logInfo', module, ...bits);
         };
 
-        const logWarn = (module: Module | null, ...bits: any[]) => {
+        this.logWarn = (module: Module | null, ...bits: any[]) => {
             if (useWarnConsoleLog) {
                 console.warn('[FRAGMENT]', ...bits);
             }
             this.emit('logWarn', module, ...bits);
         };
 
-        const logError = (module: Module | null, ...bits: any[]) => {
+        this.logError = (module: Module | null, ...bits: any[]) => {
             if (useErrorConsoleLog) {
                 console.error('[FRAGMENT]', ...bits);
             }
             this.emit('logError', module, ...bits);
         };
+    }
 
-        const validateCrc = (module: Module, targetCrc: string, actualCrc: string): boolean => {
-            logInfo(module, 'Validating file CRC');
-            logInfo(module, 'CRC should be', targetCrc, 'and is', actualCrc);
+    private async cleanupTempDir(): Promise<void> {
+        console.log(null, 'Cleaning up temp directory');
 
-            return targetCrc === actualCrc;
-        };
-
-        const downloadFile = async (file: string, module: Module, retryCount: number, crc: string, fullCrc: string, tempFolder: string): Promise<string> => {
-            logInfo(module, 'Downloading file', file, 'into temporary directory', tempFolder);
-
-            let url = urljoin(this.source, file);
-            url += `?moduleHash=${crc.substring(0, 7)}&fullHash=${fullCrc.substring(0, 7)}`;
-
-            if (retryCount) {
-                url += `&retry=${retryCount}`;
+        try {
+            // Cleanup
+            if (fs.existsSync(this.tempDir)) {
+                console.log(`temp dir exists: ${this.tempDir}`);
+                await promisify(fs.rm)(this.tempDir, { recursive: true });
             }
+        } catch (e) {
+            this.emit('error', '[FRAGMENT] Error while cleaning up temp directory');
+        }
+    }
 
-            if (options?.forceCacheBust) {
-                url += `&forcedBust=${options.forceCacheBust}`;
-            }
+    /**
+     * Install or update the newest available version.
+     */
+    public async install(): Promise<InstallInfo> {
+        try {
+            const info = await this.doInstall();
 
-            if (retryCount || options?.forceCacheBust) {
-                url += `&cache=${Math.random() * 999999999}`;
-            }
+            this.cleanupTempDir().then();
 
-            logInfo(module, 'Downloading from', url);
+            return info;
+        } catch (e) {
+            this.cleanupTempDir().then();
 
-            const destPath = path.join(tempFolder, file);
+            throw FragmenterError.createFromError(e);
+        }
+    }
 
-            const writeStream = fs.createWriteStream(destPath);
-            const readStream = await this.getUrlStream(url);
-
-            let loaded = 0;
-            const total = parseInt(readStream.headers['content-length']);
-
-            if (Number.isNaN(total)) {
-                logWarn(module, 'Server did not return Content-Length header - no download progress will be reported');
-            }
-
-            let lastPercent = -1;
-            readStream.data.on('data', (buffer: Buffer) => {
-                if (!Number.isNaN(total)) {
-                    loaded += buffer.length;
-
-                    const percent = Math.floor((loaded / total) * 100);
-
-                    if (lastPercent !== percent) {
-                        this.emit('downloadProgress', module, { loaded, total, percent });
-                    }
-
-                    lastPercent = percent;
+    private async doInstall(): Promise<InstallInfo> {
+        const createTempDirIfNeeded = async () => {
+            try {
+                if (!fs.existsSync(this.tempDir)) {
+                    await fs.mkdir(this.tempDir);
                 }
-            });
-
-            await util.promisify(stream.pipeline)(readStream.data, writeStream);
-
-            logInfo(module, 'Finished downloading file', file);
-
-            return destPath;
-        };
-
-        const downloadAndInstall = async (file: string, destDir: string, module: Module, crc: string, fullCrc: string) => {
-            let loadedFilePath: string;
-            let tempExtractDir: string;
-
-            let retryCount = 0;
-            while (retryCount < 5 && !signal.aborted) {
-                try {
-                    this.emit('downloadStarted', module);
-
-                    loadedFilePath = await downloadFile(file, module, retryCount, crc, fullCrc, tempDir);
-
-                    this.emit('downloadFinished', module);
-
-                    if (signal.aborted) {
-                        return;
-                    }
-
-                    this.emit('unzipStarted', module);
-
-                    // Extract zip file to temp directory
-                    tempExtractDir = path.join(tempDir, `extract-${path.parse(loadedFilePath).name}`);
-
-                    logInfo(module, 'Extracting ZIP to', tempExtractDir);
-
-                    const unzip = new Unzip();
-                    await unzip.extract(loadedFilePath, tempExtractDir);
-
-                    // Validate the CRC
-                    const moduleJson = JSON.parse(fs.readFileSync(path.join(tempExtractDir, SINGLE_MODULE_MANIFEST)).toString()) as DistributionModule;
-                    const actualCrc = moduleJson.hash;
-
-                    if (actualCrc === undefined) {
-                        throw new Error('module.json did not contain hash');
-                    }
-
-                    if (!validateCrc(module, crc, actualCrc)) {
-                        logError(module, 'CRC wasn\'t correct');
-                        throw new Error('Invalid CRC');
-                    } else {
-                        logInfo(module, 'CRC was correct');
-                    }
-
-                    this.emit('unzipFinished', module);
-                    logInfo(module, 'Finished extracting ZIP to', tempExtractDir);
-
-                    // Copy over extracted files to destination
-
-                    this.emit('copyStarted', module);
-                    logInfo(module, 'Copying files to', destDir);
-
-                    await fs.copy(tempExtractDir, destDir, { recursive: true });
-
-                    this.emit('copyFinished', module);
-                    logInfo(module, 'Finished copying files to', destDir);
-
-                    return;
-                } catch (e) {
-                    logError(module, e);
-                    retryCount++;
-                    if (signal.aborted) {
-                        throw new Error('User aborted');
-                    }
-
-                    logError(module, 'Retrying in', 2 ** retryCount, 'seconds');
-
-                    this.emit('retryScheduled', module, retryCount, 2 ** retryCount);
-
-                    // eslint-disable-next-line no-loop-func
-                    await new Promise((r) => setTimeout(r, (2 ** retryCount) * 1_000));
-
-                    this.emit('retryStarted', module, retryCount);
-                }
+            } catch (e) {
+                this.emit('error', '[FRAGMENT] Error while creating temp directory');
             }
-
-            this.emit('error', `[FRAGMENT] Error while downloading ${module.name} module`);
-            throw new Error(`[FRAGMENT] Error while downloading ${module.name} module`);
         };
 
         const done = (manifest: InstallManifest): InstallInfo => {
-            const canceled = signal.aborted;
+            const canceled = this.signal.aborted;
 
             if (!canceled) {
                 const manifestPath = path.join(this.destDir, INSTALL_MANIFEST);
 
-                logInfo(null, 'Writing install manifest', manifest, 'to', manifestPath);
+                this.logInfo(null, 'Writing install manifest', manifest, 'to', manifestPath);
 
                 fs.writeJSONSync(manifestPath, manifest);
 
-                logInfo(null, 'Finished writing install manifest', manifest, 'to', manifestPath);
+                this.logInfo(null, 'Finished writing install manifest', manifest, 'to', manifestPath);
             }
-
-            cleanupTempDir().then();
 
             return {
                 changed: !canceled,
@@ -247,7 +127,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             };
         };
 
-        logInfo(null, 'Finding modules to update');
+        this.logInfo(null, 'Finding modules to update');
 
         // Get modules to update
 
@@ -256,26 +136,26 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         const updateInfo = await updateChecker.needsUpdate(
             this.source,
             this.destDir,
-            { forceCacheBust: options?.forceCacheBust || options?.forceManifestCacheBust, useConsoleLog: options?.useConsoleLog ?? true },
+            { forceCacheBust: this.options?.forceCacheBust || this.options?.forceManifestCacheBust, useConsoleLog: this.options?.useConsoleLog ?? true },
         );
 
-        logInfo(null, 'Update info', updateInfo);
+        this.logInfo(null, 'Update info', updateInfo);
 
         const allUpdated = updateInfo.updatedModules.length + updateInfo.removedModules.length === updateInfo.existingManifest?.modules.length;
 
         if (allUpdated) {
-            logInfo(null, 'All modules scheduled for updating');
+            this.logInfo(null, 'All modules scheduled for updating');
         }
 
         // Do fresh install using the full zip file if needed
         const fullInstall = async () => {
-            logInfo(null, 'Performing fresh install');
+            this.logInfo(null, 'Performing fresh install');
 
             this.emit('fullDownload');
 
             // TODO maybe we don't want to delete until we are sure the download went well - would need a 'staging' state of some sort (current handled in installer)
             if (fs.existsSync(this.destDir)) {
-                logInfo(null, 'Cleaning destination directory', this.destDir);
+                this.logInfo(null, 'Cleaning destination directory', this.destDir);
 
                 await promisify(fs.rm)(this.destDir, { recursive: true });
                 await promisify(fs.mkdir)(this.destDir);
@@ -283,15 +163,17 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
             await createTempDirIfNeeded();
 
-            await downloadAndInstall(FULL_FILE, this.destDir, {
+            await this.downloadAndInstallModuleFile(FULL_FILE, this.destDir, {
                 name: 'Full',
                 sourceDir: '.',
-            }, updateInfo.distributionManifest.fullHash, updateInfo.distributionManifest.fullHash);
+                hash: updateInfo.distributionManifest.fullHash,
+                splitFileCount: updateInfo.distributionManifest.fullSplitFileCount,
+            }, updateInfo.distributionManifest.fullHash);
 
             return done({ ...updateInfo.distributionManifest, source: this.source });
         };
 
-        if (updateInfo.isFreshInstall || options?.forceFreshInstall || allUpdated) {
+        if (updateInfo.isFreshInstall || this.options?.forceFreshInstall || allUpdated) {
             return fullInstall();
         }
 
@@ -299,11 +181,11 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         const installManifestPath = path.join(this.destDir, INSTALL_MANIFEST);
         const oldInstallManifest: InstallManifest = await fs.readJSON(installManifestPath);
 
-        logInfo(null, 'Found existing manifest', oldInstallManifest);
+        this.logInfo(null, 'Found existing manifest', oldInstallManifest);
 
         // Exit when no update is needed
         if (!updateInfo.needsUpdate) {
-            logInfo(null, 'No update needed');
+            this.logInfo(null, 'No update needed');
 
             return {
                 changed: false,
@@ -318,15 +200,17 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             base: {
                 hash: '',
                 files: [],
+                splitFileCount: 0,
             },
             fullHash: '',
+            fullSplitFileCount: 0,
             source: this.source,
         };
 
         // Delete all old base files and install new base files
         if (updateInfo.baseChanged) {
             try {
-                logInfo(null, 'Updating base files');
+                this.logInfo(null, 'Updating base files');
 
                 for (const file of oldInstallManifest.base.files) {
                     const fullPath = path.join(this.destDir, file);
@@ -335,22 +219,25 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                     }
                 }
 
-                await downloadAndInstall(BASE_FILE, this.destDir, {
+                await this.downloadAndInstallModuleFile(BASE_FILE, this.destDir, {
                     name: 'Base',
                     sourceDir: '.',
-                }, updateInfo.distributionManifest.base.hash, updateInfo.distributionManifest.fullHash);
+                    hash: updateInfo.distributionManifest.base.hash,
+                    splitFileCount: updateInfo.distributionManifest.base.splitFileCount,
+                }, updateInfo.distributionManifest.fullHash);
 
                 newInstallManifest.base = updateInfo.distributionManifest.base;
             } catch (error) {
-                if (error.message.includes('Error while downloading') && !options?.disableFallbackToFull) {
-                    logError(error.message);
+                const isMaxRetriesReached = error instanceof FragmenterError && error.code === FragmenterErrorCode.MaxModuleRetries;
+
+                if (isMaxRetriesReached && !this.options?.disableFallbackToFull) {
                     return fullInstall();
                 }
 
-                throw new Error(error.message);
+                throw error;
             }
         } else {
-            logInfo(null, 'No base update needed');
+            this.logInfo(null, 'No base update needed');
 
             newInstallManifest.base = oldInstallManifest.base;
         }
@@ -358,51 +245,365 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         newInstallManifest.modules = oldInstallManifest.modules;
 
         // Delete removed and updated modules
-        logInfo(null, 'Removing changed and removed modules', [...updateInfo.removedModules, ...updateInfo.updatedModules]);
+        this.logInfo(null, 'Removing changed and removed modules', [...updateInfo.removedModules, ...updateInfo.updatedModules]);
 
         for (const module of [...updateInfo.removedModules, ...updateInfo.updatedModules]) {
-            logInfo(null, 'Removing module', module);
+            this.logInfo(null, 'Removing module', module);
 
             const fullPath = path.join(this.destDir, module.sourceDir);
 
             if (fs.existsSync(fullPath)) {
                 fs.rmdirSync(fullPath, { recursive: true });
 
-                logInfo(null, 'Removed module', module);
+                this.logInfo(null, 'Removed module', module);
             } else {
-                logWarn(null, 'Module', module, 'marked for removal not found');
+                this.logWarn(null, 'Module', module, 'marked for removal not found');
             }
+
             newInstallManifest.modules.splice(newInstallManifest.modules.findIndex((m) => m.name === module.name), 1);
         }
 
         // Install updated and added modules
         try {
-            logInfo(null, 'Installing changed and added modules', [...updateInfo.updatedModules, ...updateInfo.addedModules]);
+            this.logInfo(null, 'Installing changed and added modules', [...updateInfo.updatedModules, ...updateInfo.addedModules]);
 
             for (const module of [...updateInfo.updatedModules, ...updateInfo.addedModules]) {
                 const newModule = updateInfo.distributionManifest.modules.find((m) => m.name === module.name);
 
-                logInfo(null, 'Installing new module', newModule);
+                this.logInfo(null, 'Installing new module', newModule);
 
-                await downloadAndInstall(
+                newInstallManifest.modules.push(newModule);
+
+                await this.downloadAndInstallModuleFile(
                     `${newModule.name}.zip`,
                     path.join(this.destDir, newModule.sourceDir),
                     newModule,
-                    newModule.hash,
                     updateInfo.distributionManifest.fullHash,
                 );
-                newInstallManifest.modules.push(newModule);
             }
 
             newInstallManifest.fullHash = updateInfo.distributionManifest.fullHash;
 
             return done(newInstallManifest);
         } catch (error) {
-            if (error.message.includes('Error while downloading') && !options?.disableFallbackToFull) {
-                console.error(error.message);
+            const isMaxRetriesReached = error instanceof FragmenterError && error.code === FragmenterErrorCode.MaxModuleRetries;
+
+            if (isMaxRetriesReached && !this.options?.disableFallbackToFull) {
                 return fullInstall();
             }
-            throw new Error(error.message);
+
+            throw error;
         }
+    }
+
+    /**
+     * Gets a download stream from an URL
+     *
+     * @param url the URL
+     */
+    private async getUrlStream(url: string) {
+        const stream = (await Axios.get<stream.Readable>(url, { responseType: 'stream', signal: this.signal }));
+
+        // eslint-disable-next-line no-undef
+        this.signal.addEventListener('abort', () => {
+            stream.data.destroy();
+        });
+
+        return stream;
+    }
+
+    /**
+     * Gets headers from a url using a HEAD request
+     *
+     * @param url the URL
+     */
+    private async getUrlHead(url: string): Promise<AxiosResponseHeaders> {
+        const data = await Axios.head(url);
+
+        return data.headers;
+    }
+
+    /**
+     * Download a file and return the destination path
+     *
+     * @param file       the name of the module file to download, appended to the end of the base URL
+     * @param module     the module object for the file
+     * @param retryCount the current amount of retries we are on
+     * @param crc        the declared module crc
+     * @param fullCrc    the declared module crc of the full module
+     * @param tempFolder the temporary folder to download into
+     */
+    private async downloadModuleFile(file: string, module: DistributionModule, retryCount: number, crc: string, fullCrc: string, tempFolder: string): Promise<string> {
+        this.logInfo(module, 'Downloading file', file, 'into temporary directory', tempFolder);
+
+        const makeUrl = (fileUrl: string) => {
+            let url = fileUrl;
+
+            url += `?moduleHash=${crc.substring(0, 7)}&fullHash=${fullCrc.substring(0, 7)}`;
+
+            if (retryCount) {
+                url += `&retry=${retryCount}`;
+            }
+
+            if (this.options?.forceCacheBust) {
+                url += `&forcedBust=${this.options.forceCacheBust}`;
+            }
+
+            if (retryCount || this.options?.forceCacheBust) {
+                url += `&cache=${Math.random() * 999999999}`;
+            }
+
+            return url;
+        };
+
+        const destPath = path.join(tempFolder, file);
+
+        if (module.splitFileCount > 1) {
+            this.logInfo(module, `Downloading file ${file} in ${module.splitFileCount} parts`);
+
+            // Attempt to get the size of the complete module
+            const fullFileUrl = makeUrl(urljoin(this.source, file));
+
+            let headers;
+            let completeModuleSize: number;
+            try {
+                headers = await this.getUrlHead(fullFileUrl);
+
+                completeModuleSize = parseInt(headers['content-length']);
+            } catch (e) {
+                this.logWarn(module, `Could not make HEAD request to ${fullFileUrl} to get total module size. See exception below`);
+                this.logError(module, e);
+            }
+
+            let completeLoaded = 0;
+            for (let i = 0; i < module.splitFileCount; i++) {
+                this.logInfo(module, `Downloading module part ${i + 1}/${module.splitFileCount}`);
+
+                const paddedPartIndex = (i + 1).toString().padStart(module.splitFileCount.toString().length, '0');
+                const fileSuffix = `.sf-part${paddedPartIndex}`;
+                const baseFilePartUrl = urljoin(this.source, file) + fileSuffix;
+                const downloadUrl = makeUrl(baseFilePartUrl);
+
+                this.logInfo(module, `Downloading from ${downloadUrl}`);
+
+                const writeStream = fs.createWriteStream(destPath, { flags: 'a' });
+
+                const response = await this.getUrlStream(makeUrl(baseFilePartUrl));
+
+                let loaded = 0;
+                const partSize = parseInt(response.headers['content-length']);
+
+                if (Number.isNaN(completeModuleSize) || Number.isNaN(partSize)) {
+                    this.logWarn(module, 'Server did not return Content-Length header - no download progress will be reported');
+                }
+
+                let lastPercent = -1;
+                let lastCompletePercent = -1;
+
+                // eslint-disable-next-line no-loop-func
+                response.data.on('data', (buffer: Buffer) => {
+                    if (!Number.isNaN(completeModuleSize) && !Number.isNaN(partSize)) {
+                        loaded += buffer.length;
+                        completeLoaded += buffer.length;
+
+                        const percent = Math.floor((loaded / partSize) * 100);
+                        const completePercent = Math.floor((completeLoaded / completeModuleSize) * 100);
+
+                        if (lastPercent !== percent || lastCompletePercent !== completePercent) {
+                            this.emit('downloadProgress',
+                                module,
+                                {
+                                    loaded: completeLoaded,
+                                    total: completeModuleSize,
+                                    percent: completePercent,
+                                    partLoaded: loaded,
+                                    partTotal: partSize,
+                                    partPercent: percent,
+                                    partIndex: i,
+                                    numParts: module.splitFileCount,
+                                });
+                        }
+
+                        lastPercent = percent;
+                        lastCompletePercent = completePercent;
+                    }
+                });
+
+                response.data.pipe(writeStream);
+
+                response.data.on('close', () => {
+                    if (this.signal.aborted) {
+                        this.logError(module, 'AbortSignal triggered');
+                        throw FragmenterError.create(FragmenterErrorCode.UserAborted, 'AbortSignal triggered during download');
+                    }
+                });
+
+                await new Promise<void>((resolve) => {
+                    response.data.on('end', () => {
+                        resolve();
+                    });
+                });
+
+                this.logInfo(module, `Finished downloading file part ${i + 1}/${module.splitFileCount}`);
+            }
+
+            this.logInfo(module, `Finished downloading file ${file}`);
+        } else {
+            const writeStream = fs.createWriteStream(destPath);
+
+            const baseFilePartUrl = urljoin(this.source, file);
+            const downloadUrl = makeUrl(baseFilePartUrl);
+
+            const response = await this.getUrlStream(downloadUrl);
+
+            let loaded = 0;
+            const total = parseInt(response.headers['content-length']);
+
+            if (Number.isNaN(total)) {
+                this.logWarn(module, 'Server did not return Content-Length header - no download progress will be reported');
+            }
+
+            let lastPercent = -1;
+
+            response.data.on('data', (buffer: Buffer) => {
+                if (!Number.isNaN(total)) {
+                    loaded += buffer.length;
+
+                    const percent = Math.floor((loaded / total) * 100);
+
+                    if (lastPercent !== percent) {
+                        this.emit('downloadProgress', module, { loaded, total, percent });
+                    }
+
+                    lastPercent = percent;
+                }
+            });
+
+            response.data.pipe(writeStream);
+
+            response.data.on('close', () => {
+                this.logError(module, 'AbortSignal triggered');
+                throw FragmenterError.create(FragmenterErrorCode.UserAborted, 'AbortSignal triggered during download');
+            });
+
+            await promisify(response.data.on)('end');
+
+            this.logInfo(module, 'Finished downloading file', file);
+        }
+
+        return destPath;
+    }
+
+    private validateCrc(module: Module, targetCrc: string, actualCrc: string): boolean {
+        this.logInfo(module, 'Validating file CRC');
+        this.logInfo(module, 'CRC should be', targetCrc, 'and is', actualCrc);
+
+        return targetCrc === actualCrc;
+    }
+
+    private async downloadAndInstallModuleFile(file: string, destDir: string, module: DistributionModule, fullCrc: string) {
+        let moduleZipPath: string;
+        let tempExtractDir: string;
+
+        let retryCount = 0;
+        while (retryCount < 5 && !this.signal.aborted) {
+            try {
+                this.emit('downloadStarted', module);
+
+                moduleZipPath = await this.downloadModuleFile(file, module, retryCount, module.hash, fullCrc, this.tempDir);
+
+                if (retryCount === 0) {
+                    throw new Error('bruh fake error');
+                }
+
+                this.emit('downloadFinished', module);
+
+                if (this.signal.aborted) {
+                    return;
+                }
+
+                this.emit('unzipStarted', module);
+
+                // Extract zip file to temp directory
+                tempExtractDir = path.join(this.tempDir, `extract-${path.parse(moduleZipPath).name}`);
+
+                this.logInfo(module, 'Extracting ZIP to', tempExtractDir);
+
+                const unzip = new Unzip();
+                await unzip.extract(moduleZipPath, tempExtractDir);
+
+                // Validate the CRC
+                const moduleJson = JSON.parse(fs.readFileSync(path.join(tempExtractDir, SINGLE_MODULE_MANIFEST)).toString()) as DistributionModule;
+                const actualCrc = moduleJson.hash;
+
+                if (actualCrc === undefined) {
+                    throw FragmenterError.create(FragmenterErrorCode.ModuleJsonInvalid, 'module.json did not contain hash');
+                }
+
+                if (!this.validateCrc(module, module.hash, actualCrc)) {
+                    throw FragmenterError.create(
+                        FragmenterErrorCode.ModuleCrcMismatch,
+                        `module CRC incorrect: should be '${module.hash.substring(0, 8)}...' and was '${actualCrc.substring(0, 8)}..'`,
+                    );
+                } else {
+                    this.logInfo(module, 'CRC was correct');
+                }
+
+                this.emit('unzipFinished', module);
+                this.logInfo(module, 'Finished extracting ZIP to', tempExtractDir);
+
+                // Copy over extracted files to destination
+
+                this.emit('copyStarted', module);
+                this.logInfo(module, 'Copying files to', destDir);
+
+                await fs.copy(tempExtractDir, destDir, { recursive: true });
+
+                this.emit('copyFinished', module);
+                this.logInfo(module, 'Finished copying files to', destDir);
+
+                return;
+            } catch (e) {
+                if (e instanceof FragmenterError && e.code === FragmenterErrorCode.UserAborted) {
+                    throw e;
+                } else if (this.signal.aborted) {
+                    this.logError(module, 'AbortSignal triggered');
+
+                    throw FragmenterError.create(
+                        FragmenterErrorCode.UserAborted,
+                        'AbortSignal triggered after retry scheduled',
+                    );
+                } else {
+                    this.emit('error', e);
+                }
+
+                // Cleanup after ourselves for the next retry
+
+                if (fs.existsSync(moduleZipPath)) {
+                    fs.rmSync(moduleZipPath);
+                }
+
+                if (fs.existsSync(tempExtractDir)) {
+                    fs.rmSync(tempExtractDir, { recursive: true });
+                }
+
+                retryCount++;
+
+                const retryIn = 2 ** retryCount;
+
+                this.emit('retryScheduled', module, retryCount, retryIn);
+                this.logError(module, 'Retrying in', retryIn, 'seconds');
+
+                // eslint-disable-next-line no-loop-func
+                await new Promise((r) => setTimeout(r, retryIn * 1_000));
+
+                this.emit('retryStarted', module, retryCount);
+            }
+        }
+
+        throw FragmenterError.create(
+            FragmenterErrorCode.MaxModuleRetries,
+            `max number of retries reached for module '${module.name}'`,
+        );
     }
 }

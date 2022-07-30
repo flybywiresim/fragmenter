@@ -7,6 +7,7 @@ import { DistributionManifest, FragmenterUpdateCheckerEvents, InstallManifest, N
 import { INSTALL_MANIFEST, MODULES_MANIFEST } from './constants';
 import { getLoggerSettingsFromOptions } from './log';
 import TypedEventEmitter from './typed-emitter';
+import { FragmenterError, FragmenterErrorCode } from './errors';
 
 export class FragmenterUpdateChecker extends (EventEmitter as new () => TypedEventEmitter<FragmenterUpdateCheckerEvents>) {
     /**
@@ -27,7 +28,7 @@ export class FragmenterUpdateChecker extends (EventEmitter as new () => TypedEve
         };
 
         if (!fs.existsSync(destDir)) {
-            throw new Error('Destination directory does not exist!');
+            throw FragmenterError.create(FragmenterErrorCode.FileNotFound, 'Destination directory does not exist');
         }
 
         const installManifestPath = path.join(destDir, INSTALL_MANIFEST);
