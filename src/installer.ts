@@ -257,7 +257,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             const fullPath = path.join(this.destDir, module.sourceDir);
 
             if (fs.existsSync(fullPath)) {
-                fs.rmdirSync(fullPath, { recursive: true });
+                fs.rmSync(fullPath, { recursive: true });
 
                 this.logInfo(null, 'Removed module', module);
             } else {
