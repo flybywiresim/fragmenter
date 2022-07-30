@@ -9,6 +9,7 @@ export enum FragmenterErrorCode {
     ModuleJsonInvalid,
     ModuleCrcMismatch,
     UserAborted,
+    DownloadStreamClosed,
     Unknown,
 }
 

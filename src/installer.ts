@@ -438,6 +438,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 response.data.on('close', () => {
                     if (this.signal.aborted) {
                         this.logError(module, 'AbortSignal triggered');
+
                         throw FragmenterError.create(FragmenterErrorCode.UserAborted, 'AbortSignal triggered during download');
                     }
                 });
@@ -485,14 +486,25 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
             response.data.pipe(writeStream);
 
-            response.data.on('close', () => {
-                if (this.signal.aborted) {
-                    this.logError(module, 'AbortSignal triggered');
-                    throw FragmenterError.create(FragmenterErrorCode.UserAborted, 'AbortSignal triggered during download');
-                }
-            });
+            await new Promise((resolve, reject) => {
+                response.data.on('end', resolve);
 
-            await new Promise((resolve) => response.data.on('end', resolve));
+                response.data.on('close', () => {
+                    try {
+                        writeStream.close();
+                    } catch (e) {
+                        this.logError(module, `Could not close write stream to '${destPath}'`);
+                    }
+
+                    if (this.signal.aborted) {
+                        this.logError(module, 'AbortSignal triggered');
+
+                        reject(FragmenterError.create(FragmenterErrorCode.UserAborted, 'AbortSignal triggered during download'));
+                    } else {
+                        reject(FragmenterError.create(FragmenterErrorCode.DownloadStreamClosed, 'Download stream closed for unknown reason'));
+                    }
+                });
+            });
 
             this.logInfo(module, 'Finished downloading file', file);
         }
@@ -571,10 +583,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 } else if (this.signal.aborted) {
                     this.logError(module, 'AbortSignal triggered');
 
-                    throw FragmenterError.create(
-                        FragmenterErrorCode.UserAborted,
-                        'AbortSignal triggered after retry scheduled',
-                    );
+                    throw FragmenterError.create(FragmenterErrorCode.UserAborted, 'AbortSignal triggered after retry scheduled');
                 } else {
                     this.emit('error', e);
                 }
