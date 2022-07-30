@@ -72,7 +72,6 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         try {
             // Cleanup
             if (fs.existsSync(this.tempDir)) {
-                console.log(`temp dir exists: ${this.tempDir}`);
                 await promisify(fs.rm)(this.tempDir, { recursive: true });
             }
         } catch (e) {
