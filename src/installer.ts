@@ -486,8 +486,10 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             response.data.pipe(writeStream);
 
             response.data.on('close', () => {
-                this.logError(module, 'AbortSignal triggered');
-                throw FragmenterError.create(FragmenterErrorCode.UserAborted, 'AbortSignal triggered during download');
+                if (this.signal.aborted) {
+                    this.logError(module, 'AbortSignal triggered');
+                    throw FragmenterError.create(FragmenterErrorCode.UserAborted, 'AbortSignal triggered during download');
+                }
             });
 
             await promisify(response.data.on)('end');
