@@ -511,7 +511,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         let tempExtractDir: string;
 
         let retryCount = 0;
-        while (retryCount < 5 && !this.signal.aborted) {
+        while (retryCount < (this.options?.maxModuleRetries ?? 5) && !this.signal.aborted) {
             try {
                 this.emit('downloadStarted', module);
 
