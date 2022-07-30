@@ -517,10 +517,6 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
                 moduleZipPath = await this.downloadModuleFile(file, module, retryCount, module.hash, fullCrc, this.tempDir);
 
-                if (retryCount === 0) {
-                    throw new Error('bruh fake error');
-                }
-
                 this.emit('downloadFinished', module);
 
                 if (this.signal.aborted) {
