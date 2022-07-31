@@ -435,17 +435,23 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
                 response.data.pipe(writeStream);
 
-                response.data.on('close', () => {
-                    if (this.signal.aborted) {
-                        this.logError(module, 'AbortSignal triggered');
+                await new Promise((resolve, reject) => {
+                    response.data.on('end', resolve);
 
-                        throw FragmenterError.create(FragmenterErrorCode.UserAborted, 'AbortSignal triggered during download');
-                    }
-                });
+                    response.data.on('close', () => {
+                        try {
+                            writeStream.close();
+                        } catch (e) {
+                            this.logError(module, `Could not close write stream to '${destPath}'`);
+                        }
 
-                await new Promise<void>((resolve) => {
-                    response.data.on('end', () => {
-                        resolve();
+                        if (this.signal.aborted) {
+                            this.logError(module, 'AbortSignal triggered');
+
+                            reject(FragmenterError.create(FragmenterErrorCode.UserAborted, 'AbortSignal triggered during download'));
+                        } else {
+                            reject(FragmenterError.create(FragmenterErrorCode.DownloadStreamClosed, 'Download stream closed for unknown reason'));
+                        }
                     });
                 });
 
