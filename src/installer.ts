@@ -171,6 +171,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 sourceDir: '.',
                 hash: updateInfo.distributionManifest.fullHash,
                 splitFileCount: updateInfo.distributionManifest.fullSplitFileCount,
+                completeFileSize: updateInfo.distributionManifest.fullCompleteFileSize,
             }, updateInfo.distributionManifest.fullHash);
 
             return done({ ...updateInfo.distributionManifest, source: this.source });
@@ -204,9 +205,11 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 hash: '',
                 files: [],
                 splitFileCount: 0,
+                completeFileSize: 0,
             },
             fullHash: '',
             fullSplitFileCount: 0,
+            fullCompleteFileSize: 0,
             source: this.source,
         };
 
@@ -228,6 +231,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                     sourceDir: '.',
                     hash: updateInfo.distributionManifest.base.hash,
                     splitFileCount: updateInfo.distributionManifest.base.splitFileCount,
+                    completeFileSize: updateInfo.distributionManifest.base.completeFileSize,
                 }, updateInfo.distributionManifest.fullHash);
 
                 newInstallManifest.base = updateInfo.distributionManifest.base;
@@ -287,6 +291,8 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             }
 
             newInstallManifest.fullHash = updateInfo.distributionManifest.fullHash;
+            newInstallManifest.fullSplitFileCount = updateInfo.distributionManifest.fullSplitFileCount;
+            newInstallManifest.fullCompleteFileSize = updateInfo.distributionManifest.fullCompleteFileSize;
 
             return done(newInstallManifest);
         } catch (error) {
@@ -375,8 +381,9 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
                 completeModuleSize = parseInt(headers['content-length']);
             } catch (e) {
-                this.logWarn(module, `Could not make HEAD request to ${fullFileUrl} to get total module size. See exception below`);
-                this.logError(module, e);
+                this.logWarn(module, `Could not make HEAD request to ${fullFileUrl} to get total module size. Using distribution manifest size`);
+
+                completeModuleSize = module.completeFileSize;
             }
 
             let completeLoaded = 0;

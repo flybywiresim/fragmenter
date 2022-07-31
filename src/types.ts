@@ -1,6 +1,7 @@
 export interface Base {
     hash: string;
     splitFileCount: number;
+    completeFileSize: number;
     files: string[];
 }
 
@@ -16,6 +17,7 @@ export interface DistributionManifest {
     base: Base;
     fullHash: string;
     fullSplitFileCount: number;
+    fullCompleteFileSize: number;
 }
 
 export interface InstallManifest extends DistributionManifest {
@@ -35,6 +37,7 @@ export interface Module {
 export interface DistributionModule extends Module {
     hash: string;
     splitFileCount: number;
+    completeFileSize: number;
 }
 
 export interface CrcInfo {

@@ -48,7 +48,7 @@ export async function pack(buildManifest: BuildManifest): Promise<DistributionMa
     const generateHashFromPaths = (absolutePaths: string[], baseDir: string): string => hasha(absolutePaths.map((p) => hasha(path.basename(p) + generateHashFromPath(p, baseDir)))
         .join(''));
 
-    const zip = async (sourcePath: string, zipDest: string): Promise<[crc: string, splitFileCount: number]> => {
+    const zip = async (sourcePath: string, zipDest: string): Promise<[crc: string, splitFileCount: number, completeModuleSize: number]> => {
         console.log('[FRAGMENT] Calculating CRC', {
             source: sourcePath,
             dest: zipDest,
@@ -90,10 +90,10 @@ export async function pack(buildManifest: BuildManifest): Promise<DistributionMa
 
         console.log('[FRAGMENT] Done writing zip', zipDest);
 
-        return [crcInfo.hash, splitFileCount];
+        return [crcInfo.hash, splitFileCount, zipStat.size];
     };
 
-    const zipAndDelete = async (sourcePath: string, zipDest: string): Promise<[crc: string, splitFileCount: number]> => {
+    const zipAndDelete = async (sourcePath: string, zipDest: string): Promise<[crc: string, splitFileCount: number, completeModuleSize: number]> => {
         const res = await zip(sourcePath, zipDest);
 
         fs.rmdirSync(sourcePath, { recursive: true });
@@ -160,14 +160,21 @@ export async function pack(buildManifest: BuildManifest): Promise<DistributionMa
                 hash: '',
                 files: [],
                 splitFileCount: 0,
+                completeFileSize: 0,
             },
             fullHash: '',
             fullSplitFileCount: 0,
+            fullCompleteFileSize: 0,
         };
 
         // Create full zip
         console.log('[FRAGMENT] Creating full ZIP');
-        [distributionManifest.fullHash, distributionManifest.fullSplitFileCount] = await zip(tempDir, path.join(buildManifest.outDir, FULL_FILE));
+
+        [
+            distributionManifest.fullHash,
+            distributionManifest.fullSplitFileCount,
+            distributionManifest.fullCompleteFileSize,
+        ] = await zip(tempDir, path.join(buildManifest.outDir, FULL_FILE));
 
         // Zip Modules
         console.log('[FRAGMENT] Creating module ZIPs');
@@ -176,12 +183,13 @@ export async function pack(buildManifest: BuildManifest): Promise<DistributionMa
             const sourcePath = path.join(tempDir, module.sourceDir);
             const zipDest = path.join(buildManifest.outDir, `${module.name}.zip`);
 
-            const [hash, splitFileCount] = await zipAndDelete(sourcePath, zipDest);
+            const [hash, splitFileCount, completeFileSize] = await zipAndDelete(sourcePath, zipDest);
 
             distributionManifest.modules.push({
                 ...module,
                 hash,
                 splitFileCount,
+                completeFileSize,
             });
         }
 
@@ -193,7 +201,11 @@ export async function pack(buildManifest: BuildManifest): Promise<DistributionMa
 
         const zipDest = path.join(buildManifest.outDir, BASE_FILE);
 
-        [distributionManifest.base.hash, distributionManifest.base.splitFileCount] = await zipAndDelete(tempDir, zipDest);
+        [
+            distributionManifest.base.hash,
+            distributionManifest.base.splitFileCount,
+            distributionManifest.base.completeFileSize,
+        ] = await zipAndDelete(tempDir, zipDest);
 
         await fs.writeJSON(path.join(buildManifest.outDir, MODULES_MANIFEST), distributionManifest);
 
