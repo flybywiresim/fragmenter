@@ -33,7 +33,7 @@ export class FragmenterError extends Error {
     }
 
     private static interpretNodeException(e: Error): FragmenterErrorCode | null {
-        const errorCode = (e as unknown as { code: string }).code;
+        const errorCode = (e as unknown as { code: string }).code ?? e.message;
 
         switch (errorCode) {
         case 'EACCES':
@@ -52,3 +52,12 @@ export class FragmenterError extends Error {
         }
     }
 }
+
+export const UnrecoverableErrors = [
+    FragmenterErrorCode.PermissionsError,
+    FragmenterErrorCode.NoSpaceOnDevice,
+    FragmenterErrorCode.MaxModuleRetries,
+    FragmenterErrorCode.FileNotFound,
+    FragmenterErrorCode.DirectoryNotEmpty,
+    FragmenterErrorCode.NotADirectory,
+];

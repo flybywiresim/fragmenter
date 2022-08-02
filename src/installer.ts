@@ -12,7 +12,7 @@ import { DistributionModule, FragmenterInstallerEvents, InstallInfo, InstallMani
 import TypedEventEmitter from './typed-emitter';
 import { getLoggerSettingsFromOptions } from './log';
 import { FragmenterUpdateChecker } from './checks';
-import { FragmenterError, FragmenterErrorCode } from './errors';
+import { FragmenterError, FragmenterErrorCode, UnrecoverableErrors } from './errors';
 
 const DEFAULT_TEMP_DIRECTORY_PREFIX = 'fbw-fragmenter-temp';
 
@@ -598,6 +598,12 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
                     throw FragmenterError.create(FragmenterErrorCode.UserAborted, 'AbortSignal triggered after retry scheduled');
                 } else {
+                    const fragmenterError = FragmenterError.createFromError(e);
+
+                    if (UnrecoverableErrors.includes(fragmenterError.code)) {
+                        throw fragmenterError;
+                    }
+
                     this.emit('error', e);
                 }
 
