@@ -7,7 +7,6 @@ import { DistributionManifest, FragmenterUpdateCheckerEvents, InstallManifest, N
 import { INSTALL_MANIFEST, MODULES_MANIFEST } from './constants';
 import { getLoggerSettingsFromOptions } from './log';
 import TypedEventEmitter from './typed-emitter';
-import { FragmenterError, FragmenterErrorCode } from './errors';
 
 export class FragmenterUpdateChecker extends (EventEmitter as new () => TypedEventEmitter<FragmenterUpdateCheckerEvents>) {
     /**
@@ -26,10 +25,6 @@ export class FragmenterUpdateChecker extends (EventEmitter as new () => TypedEve
             }
             this.emit('logInfo', null, ...bits);
         };
-
-        if (!fs.existsSync(destDir)) {
-            throw FragmenterError.create(FragmenterErrorCode.FileNotFound, 'Destination directory does not exist');
-        }
 
         const installManifestPath = path.join(destDir, INSTALL_MANIFEST);
         let existingInstall: InstallManifest;
@@ -65,7 +60,7 @@ export class FragmenterUpdateChecker extends (EventEmitter as new () => TypedEve
 
             logInfo('Existing install', existingInstall);
         } else {
-            logInfo('No existing install found. Update needed.');
+            logInfo('No existing install found. Fresh install needed.');
 
             updateInfo.needsUpdate = true;
             updateInfo.isFreshInstall = true;
