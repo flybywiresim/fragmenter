@@ -7,6 +7,7 @@ import stream from 'stream';
 import path from 'path';
 import fs from 'fs-extra';
 import * as os from 'os';
+import readRecurse from 'fs-readdir-recursive';
 import { BASE_FILE, FULL_FILE, INSTALL_MANIFEST, SINGLE_MODULE_MANIFEST } from './constants';
 import { DistributionModule, FragmenterInstallerEvents, InstallInfo, InstallManifest, InstallOptions, Module } from './types';
 import TypedEventEmitter from './typed-emitter';
@@ -172,6 +173,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 hash: updateInfo.distributionManifest.fullHash,
                 splitFileCount: updateInfo.distributionManifest.fullSplitFileCount,
                 completeFileSize: updateInfo.distributionManifest.fullCompleteFileSize,
+                completeFileSizeUncompressed: updateInfo.distributionManifest.fullCompleteFileSizeUncompressed,
             }, updateInfo.distributionManifest.fullHash);
 
             return done({ ...updateInfo.distributionManifest, source: this.source });
@@ -206,10 +208,12 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 files: [],
                 splitFileCount: 0,
                 completeFileSize: 0,
+                completeFileSizeUncompressed: 0,
             },
             fullHash: '',
             fullSplitFileCount: 0,
             fullCompleteFileSize: 0,
+            fullCompleteFileSizeUncompressed: 0,
             source: this.source,
         };
 
@@ -232,6 +236,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                     hash: updateInfo.distributionManifest.base.hash,
                     splitFileCount: updateInfo.distributionManifest.base.splitFileCount,
                     completeFileSize: updateInfo.distributionManifest.base.completeFileSize,
+                    completeFileSizeUncompressed: updateInfo.distributionManifest.base.completeFileSizeUncompressed,
                 }, updateInfo.distributionManifest.fullHash);
 
                 newInstallManifest.base = updateInfo.distributionManifest.base;
@@ -417,8 +422,8 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                         loaded += buffer.length;
                         completeLoaded += buffer.length;
 
-                        const percent = Math.floor((loaded / partSize) * 100);
-                        const completePercent = Math.floor((completeLoaded / completeModuleSize) * 100);
+                        const percent = Math.round((loaded / partSize) * 100);
+                        const completePercent = Math.round((completeLoaded / completeModuleSize) * 100);
 
                         if (lastPercent !== percent || lastCompletePercent !== completePercent) {
                             this.emit('downloadProgress',
@@ -536,6 +541,16 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         let moduleZipPath: string;
         let tempExtractDir: string;
 
+        const clearTempModuleData = async () => {
+            if (fs.existsSync(moduleZipPath)) {
+                await promisify(fs.rm)(moduleZipPath);
+            }
+
+            if (fs.existsSync(tempExtractDir)) {
+                await promisify(fs.rm)(tempExtractDir, { recursive: true });
+            }
+        };
+
         let retryCount = 0;
         while (retryCount < (this.options?.maxModuleRetries ?? 5) && !this.signal.aborted) {
             try {
@@ -576,15 +591,44 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                     this.logInfo(module, 'CRC was correct');
                 }
 
+                // Delete the zip file
+                await promisify(fs.rm)(moduleZipPath);
+
                 this.emit('unzipFinished', module);
                 this.logInfo(module, 'Finished extracting ZIP to', tempExtractDir);
 
-                // Copy over extracted files to destination
+                // Move over extracted files to destination
 
                 this.emit('copyStarted', module);
-                this.logInfo(module, 'Copying files to', destDir);
+                this.logInfo(module, 'Moving files to', destDir);
 
-                await fs.copy(tempExtractDir, destDir, { recursive: true });
+                const files = readRecurse(tempExtractDir);
+
+                let moved = 0;
+                let lastMovedPercent = 0;
+                for (const file of files) {
+                    const absoluteSourcePath = path.resolve(tempExtractDir, file);
+                    const absoluteDestPath = path.resolve(destDir, file);
+
+                    await fs.move(absoluteSourcePath, absoluteDestPath);
+
+                    moved++;
+
+                    const percent = Math.round((moved / files.length) * 100);
+
+                    if (lastMovedPercent !== percent) {
+                        this.emit('copyProgress', module, {
+                            moved,
+                            total: files.length,
+                            percent,
+                        });
+                    }
+
+                    lastMovedPercent = percent;
+                }
+
+                // Cleanup
+                await clearTempModuleData();
 
                 this.emit('copyFinished', module);
                 this.logInfo(module, 'Finished copying files to', destDir);
@@ -608,14 +652,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 }
 
                 // Cleanup after ourselves for the next retry
-
-                if (fs.existsSync(moduleZipPath)) {
-                    fs.rmSync(moduleZipPath);
-                }
-
-                if (fs.existsSync(tempExtractDir)) {
-                    fs.rmSync(tempExtractDir, { recursive: true });
-                }
+                await clearTempModuleData();
 
                 retryCount++;
 

@@ -54,6 +54,9 @@ export class FragmenterUpdateChecker extends (EventEmitter as new () => TypedEve
             addedModules: [],
             removedModules: [],
             updatedModules: [],
+
+            downloadSize: undefined,
+            requiredDiskSpace: undefined,
         };
 
         if (fs.existsSync(installManifestPath)) {
@@ -68,6 +71,8 @@ export class FragmenterUpdateChecker extends (EventEmitter as new () => TypedEve
             updateInfo.isFreshInstall = true;
             updateInfo.addedModules = distribution.modules;
             updateInfo.baseChanged = true;
+            updateInfo.downloadSize = distribution.fullCompleteFileSize;
+            updateInfo.requiredDiskSpace = distribution.fullCompleteFileSizeUncompressed;
             return updateInfo;
         }
 
@@ -86,6 +91,9 @@ export class FragmenterUpdateChecker extends (EventEmitter as new () => TypedEve
 
         if (updateInfo.addedModules.length > 0 || updateInfo.removedModules.length > 0 || updateInfo.updatedModules.length > 0) {
             updateInfo.needsUpdate = true;
+
+            updateInfo.downloadSize = [...updateInfo.addedModules, ...updateInfo.updatedModules].reduce((accu, module) => accu + module.completeFileSize, 0);
+            updateInfo.requiredDiskSpace = [...updateInfo.addedModules, ...updateInfo.updatedModules].reduce((accu, module) => accu + module.completeFileSizeUncompressed, 0);
         }
 
         return updateInfo;

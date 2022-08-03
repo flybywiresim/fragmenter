@@ -1,7 +1,8 @@
 export interface Base {
     hash: string;
-    splitFileCount: number;
-    completeFileSize: number;
+    splitFileCount?: number;
+    completeFileSize?: number;
+    completeFileSizeUncompressed?: number;
     files: string[];
 }
 
@@ -16,8 +17,9 @@ export interface DistributionManifest {
     modules: DistributionModule[];
     base: Base;
     fullHash: string;
-    fullSplitFileCount: number;
-    fullCompleteFileSize: number;
+    fullSplitFileCount?: number;
+    fullCompleteFileSize?: number;
+    fullCompleteFileSizeUncompressed?: number;
 }
 
 export interface InstallManifest extends DistributionManifest {
@@ -36,8 +38,9 @@ export interface Module {
 
 export interface DistributionModule extends Module {
     hash: string;
-    splitFileCount: number;
-    completeFileSize: number;
+    splitFileCount?: number;
+    completeFileSize?: number;
+    completeFileSizeUncompressed?: number;
 }
 
 export interface CrcInfo {
@@ -52,6 +55,16 @@ export interface UpdateInfo {
     addedModules: DistributionModule[];
     removedModules: DistributionModule[];
     updatedModules: DistributionModule[];
+
+    /**
+     * Download size in bytes of the update, if available
+     */
+    downloadSize?: number;
+
+    /**
+     * Required disk space to perform the update, if available
+     */
+    requiredDiskSpace?: number;
 
     distributionManifest: DistributionManifest;
     existingManifest?: InstallManifest;
@@ -69,6 +82,15 @@ export interface DownloadProgress {
     partPercent?: number;
     partIndex?: number;
     numParts?: number;
+}
+
+/**
+ * Copy progress for a single module.
+ */
+export interface CopyProgress {
+    total: number;
+    moved: number;
+    percent: number;
 }
 
 /**
@@ -173,6 +195,7 @@ export interface FragmenterInstallerEvents {
     'unzipStarted': (module: Module) => void;
     'unzipFinished': (module: Module) => void;
     'copyStarted': (module: Module) => void;
+    'copyProgress': (module: Module, progress: CopyProgress) => void;
     'copyFinished': (module: Module) => void;
     'retryScheduled': (module: Module, retryCount: number, waitSeconds: number) => void;
     'retryStarted': (module: Module, retryCount: number) => void;
