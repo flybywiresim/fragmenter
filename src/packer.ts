@@ -32,21 +32,38 @@ export async function pack(buildManifest: BuildManifest): Promise<DistributionMa
         Object.assign(options, buildManifest.packOptions);
     }
 
-    const generateHashFromPath = (absolutePath: string, baseDir: string): string => {
+    const generateHashFromPath = async (absolutePath: string, baseDir: string): Promise<string> => {
         // The hash is undefined if the path doesn't exist.
-        if (!fs.existsSync(absolutePath)) return undefined;
+        if (!fs.existsSync(absolutePath)) {
+            return undefined;
+        }
 
         const stats = fs.statSync(absolutePath);
+
         if (stats.isFile()) {
-            return hasha(path.relative(absolutePath, baseDir)
-                .replace(/\\/g, '/') + hasha.fromStream(fs.createReadStream(absolutePath)));
+            const relativePath = path.relative(absolutePath, baseDir);
+            const normalizedPath = relativePath.replace(/\\/g, '/');
+
+            return hasha(normalizedPath + await hasha.fromStream(fs.createReadStream(absolutePath)));
+        } else {
+            const directoryPaths = fs.readdirSync(absolutePath)
+                .map((i) => path.join(absolutePath, i));
+
+            return generateHashFromPaths(directoryPaths, baseDir);
         }
-        return generateHashFromPaths(fs.readdirSync(absolutePath)
-            .map((i) => path.join(absolutePath, i)), baseDir);
     };
 
-    const generateHashFromPaths = (absolutePaths: string[], baseDir: string): string => hasha(absolutePaths.map((p) => hasha(path.basename(p) + generateHashFromPath(p, baseDir)))
-        .join(''));
+    const generateHashFromPaths = async (absolutePaths: string[], baseDir: string): Promise<string> => {
+        const paths = [];
+        for (const absolutePath of absolutePaths) {
+            const baseName = path.basename(absolutePath);
+            const contentsHash = await generateHashFromPath(absolutePath, baseDir);
+
+            paths.push(hasha(baseName + contentsHash));
+        }
+
+        return hasha(paths.join(''));
+    };
 
     const zip = async (sourcePath: string, zipDest: string): Promise<[crc: string, splitFileCount: number, completeModuleSize: number, completeFileSizeUncompressed: number]> => {
         console.log('[FRAGMENT] Calculating CRC', {
@@ -57,7 +74,7 @@ export async function pack(buildManifest: BuildManifest): Promise<DistributionMa
         const filesInModule = readRecurse(sourcePath)
             .map((i) => path.resolve(sourcePath, i));
 
-        const crcInfo: CrcInfo = { hash: generateHashFromPaths(filesInModule, sourcePath) };
+        const crcInfo: CrcInfo = { hash: await generateHashFromPaths(filesInModule, sourcePath) };
         await fs.writeJSON(path.join(sourcePath, SINGLE_MODULE_MANIFEST), crcInfo);
 
         console.log('[FRAGMENT] Creating ZIP', {

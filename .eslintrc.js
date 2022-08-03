@@ -49,5 +49,6 @@ module.exports = {
         'no-console': 'off',
         'import/no-unresolved': 'off',
         'no-undef': 'off',
+        'no-else-return': 'off',
     },
 };
