@@ -22,6 +22,10 @@ export class FragmenterError extends Error {
         super(fromError?.message);
     }
 
+    static isFragmenterError(error: Error): boolean {
+        return error.message.includes('FragmenterError(');
+    }
+
     static createFromError(e: Error) {
         const code = this.interpretNodeException(e);
 

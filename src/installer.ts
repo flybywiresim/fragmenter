@@ -68,7 +68,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
     }
 
     private async cleanupTempDir(): Promise<void> {
-        console.log(null, 'Cleaning up temp directory');
+        this.logInfo(null, 'Cleaning up temp directory');
 
         try {
             // Cleanup
@@ -93,7 +93,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         } catch (e) {
             this.cleanupTempDir().then();
 
-            if (e instanceof FragmenterError) {
+            if (FragmenterError.isFragmenterError(e)) {
                 throw e;
             } else {
                 throw FragmenterError.createFromError(e);
@@ -241,7 +241,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
                 newInstallManifest.base = updateInfo.distributionManifest.base;
             } catch (error) {
-                const isMaxRetriesReached = error instanceof FragmenterError && error.code === FragmenterErrorCode.MaxModuleRetries;
+                const isMaxRetriesReached = FragmenterError.isFragmenterError(error) && error.code === FragmenterErrorCode.MaxModuleRetries;
 
                 if (isMaxRetriesReached && !this.options?.disableFallbackToFull) {
                     return fullInstall();
@@ -301,7 +301,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
             return done(newInstallManifest);
         } catch (error) {
-            const isMaxRetriesReached = error instanceof FragmenterError && error.code === FragmenterErrorCode.MaxModuleRetries;
+            const isMaxRetriesReached = FragmenterError.isFragmenterError(error) && error.code === FragmenterErrorCode.MaxModuleRetries;
 
             if (isMaxRetriesReached && !this.options?.disableFallbackToFull) {
                 return fullInstall();
@@ -448,7 +448,12 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 response.data.pipe(writeStream);
 
                 await new Promise((resolve, reject) => {
-                    response.data.on('end', resolve);
+                    writeStream.on('close', resolve);
+
+                    response.data.on('error', (e) => {
+                        this.emit('error', e);
+                        reject(FragmenterError.create(FragmenterErrorCode.DownloadStreamClosed, 'Download stream closed for unknown reason'));
+                    });
 
                     response.data.on('close', () => {
                         try {
@@ -461,8 +466,6 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                             this.logError(module, 'AbortSignal triggered');
 
                             reject(FragmenterError.create(FragmenterErrorCode.UserAborted, 'AbortSignal triggered during download'));
-                        } else {
-                            reject(FragmenterError.create(FragmenterErrorCode.DownloadStreamClosed, 'Download stream closed for unknown reason'));
                         }
                     });
                 });
@@ -505,7 +508,12 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             response.data.pipe(writeStream);
 
             await new Promise((resolve, reject) => {
-                response.data.on('end', resolve);
+                writeStream.on('close', resolve);
+
+                response.data.on('error', (e) => {
+                    this.emit('error', e);
+                    reject(FragmenterError.create(FragmenterErrorCode.DownloadStreamClosed, 'Download stream closed for unknown reason'));
+                });
 
                 response.data.on('close', () => {
                     try {
@@ -518,8 +526,6 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                         this.logError(module, 'AbortSignal triggered');
 
                         reject(FragmenterError.create(FragmenterErrorCode.UserAborted, 'AbortSignal triggered during download'));
-                    } else {
-                        reject(FragmenterError.create(FragmenterErrorCode.DownloadStreamClosed, 'Download stream closed for unknown reason'));
                     }
                 });
             });
@@ -631,7 +637,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 await clearTempModuleData();
 
                 this.emit('copyFinished', module);
-                this.logInfo(module, 'Finished copying files to', destDir);
+                this.logInfo(module, 'Finished moving files to', destDir);
 
                 return;
             } catch (e) {
