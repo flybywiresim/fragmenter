@@ -22,7 +22,7 @@ export class FragmenterError extends Error {
         super(fromError?.message);
     }
 
-    static isFragmenterError(error: Error): boolean {
+    static isFragmenterError(error: Error): error is FragmenterError {
         return error.message.includes('FragmenterError(');
     }
 
