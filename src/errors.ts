@@ -36,6 +36,26 @@ export class FragmenterError extends Error {
         return new FragmenterError(code, `FragmenterError(${FragmenterErrorCode[code]}): ${message}`);
     }
 
+    static parseFromMessage(message: string): FragmenterError {
+        const regex = /FragmenterError\((\w+)\):\s*(.+)/;
+
+        const match = message.match(regex);
+
+        if (!match) {
+            throw new Error('Could not parse FragmenterError: does not match regex');
+        }
+
+        const [, codeString, messageString] = match;
+
+        const code = FragmenterErrorCode[codeString as any];
+
+        if (typeof code !== 'number') {
+            throw new Error('Could not parse FragmenterError: unknown code string');
+        }
+
+        return FragmenterError.create(code, messageString);
+    }
+
     private static interpretNodeException(e: Error): FragmenterErrorCode | null {
         const errorCode = (e as unknown as { code: string }).code ?? e.message;
 
