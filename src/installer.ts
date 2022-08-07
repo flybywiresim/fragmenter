@@ -450,9 +450,14 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 await new Promise((resolve, reject) => {
                     writeStream.on('close', resolve);
 
-                    response.data.on('error', (e) => {
-                        this.emit('error', e);
+                    response.data.on('error', () => {
                         reject(FragmenterError.create(FragmenterErrorCode.DownloadStreamClosed, 'Download stream closed for unknown reason'));
+                    });
+
+                    writeStream.on('error', (e) => {
+                        const fragmenterError = FragmenterError.createFromError(e);
+
+                        reject(fragmenterError);
                     });
 
                     response.data.on('close', () => {
@@ -513,6 +518,12 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 response.data.on('error', (e) => {
                     this.emit('error', e);
                     reject(FragmenterError.create(FragmenterErrorCode.DownloadStreamClosed, 'Download stream closed for unknown reason'));
+                });
+
+                writeStream.on('error', (e) => {
+                    const fragmenterError = FragmenterError.createFromError(e);
+
+                    reject(fragmenterError);
                 });
 
                 response.data.on('close', () => {
@@ -641,7 +652,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
                 return;
             } catch (e) {
-                if (e instanceof FragmenterError && e.code === FragmenterErrorCode.UserAborted) {
+                if (FragmenterError.isFragmenterError(e)) {
                     throw e;
                 } else if (this.signal.aborted) {
                     this.logError(module, 'AbortSignal triggered');
