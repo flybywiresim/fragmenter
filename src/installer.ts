@@ -450,7 +450,9 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 await new Promise((resolve, reject) => {
                     writeStream.on('close', resolve);
 
-                    response.data.on('error', () => {
+                    response.data.on('error', (e) => {
+                        this.emit('error', e);
+
                         reject(FragmenterError.create(FragmenterErrorCode.DownloadStreamClosed, 'Download stream closed for unknown reason'));
                     });
 
@@ -517,6 +519,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
                 response.data.on('error', (e) => {
                     this.emit('error', e);
+
                     reject(FragmenterError.create(FragmenterErrorCode.DownloadStreamClosed, 'Download stream closed for unknown reason'));
                 });
 
