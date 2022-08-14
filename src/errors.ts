@@ -10,6 +10,7 @@ export enum FragmenterErrorCode {
     ModuleCrcMismatch,
     UserAborted,
     DownloadStreamClosed,
+    CorruptedZipFile,
     Unknown,
 }
 
@@ -23,7 +24,7 @@ export class FragmenterError extends Error {
     }
 
     static isFragmenterError(error: Error): error is FragmenterError {
-        return error.message.includes('FragmenterError(');
+        return error?.message?.includes('FragmenterError(');
     }
 
     static createFromError(e: Error) {
@@ -57,6 +58,10 @@ export class FragmenterError extends Error {
     }
 
     private static interpretNodeException(e: Error): FragmenterErrorCode | null {
+        if (CorruptedZipMessages.includes(e.message.trim())) {
+            return FragmenterErrorCode.CorruptedZipFile;
+        }
+
         const errorCode = (e as unknown as { code: string }).code ?? e.message;
 
         switch (errorCode) {
@@ -84,4 +89,9 @@ export const UnrecoverableErrors = [
     FragmenterErrorCode.FileNotFound,
     FragmenterErrorCode.DirectoryNotEmpty,
     FragmenterErrorCode.NotADirectory,
+];
+
+const CorruptedZipMessages = [
+    'unexpected EOF',
+    'end of central directory record signature not found',
 ];

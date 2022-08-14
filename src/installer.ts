@@ -9,11 +9,12 @@ import fs from 'fs-extra';
 import * as os from 'os';
 import readRecurse from 'fs-readdir-recursive';
 import { BASE_FILE, FULL_FILE, INSTALL_MANIFEST, SINGLE_MODULE_MANIFEST } from './constants';
-import { DistributionModule, FragmenterInstallerEvents, InstallInfo, InstallManifest, InstallOptions, Module } from './types';
+import { DistributionModule, FragmenterInstallerEvents, InstallInfo, InstallManifest, Module } from './types';
 import TypedEventEmitter from './typed-emitter';
 import { getLoggerSettingsFromOptions } from './log';
 import { FragmenterUpdateChecker } from './checks';
 import { FragmenterError, FragmenterErrorCode, UnrecoverableErrors } from './errors';
+import { InstallOptions } from './install';
 
 const DEFAULT_TEMP_DIRECTORY_PREFIX = 'fbw-fragmenter-temp';
 
@@ -140,7 +141,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         const updateInfo = await updateChecker.needsUpdate(
             this.source,
             this.destDir,
-            { forceCacheBust: this.options?.forceCacheBust || this.options?.forceManifestCacheBust, useConsoleLog: this.options?.useConsoleLog ?? true },
+            { forceCacheBust: this.options?.forceCacheBust || this.options?.forceManifestCacheBust, useConsoleLog: true },
         );
 
         this.logInfo(null, 'Update info', updateInfo);
@@ -640,7 +641,6 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                         this.emit('copyProgress', module, {
                             moved,
                             total: files.length,
-                            percent,
                         });
                     }
 

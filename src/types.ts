@@ -1,3 +1,5 @@
+import { ModuleDecompressorProgress } from './install/module-decompressor';
+
 export interface Base {
     hash: string;
     splitFileCount?: number;
@@ -90,7 +92,6 @@ export interface DownloadProgress {
 export interface CopyProgress {
     total: number;
     moved: number;
-    percent: number;
 }
 
 /**
@@ -107,12 +108,16 @@ export interface BaseCommandOptions {
     /**
      * Whether to produce `console.log` and/or `console.error` outputs.
      *
-     * Specify `false` to disable both and instead only emit `logInfo`, `logWarn` and `logError` events.
-     * Specify an object of form `{ info: boolean, error: boolean }` to do so for specific levels.
-     *
      * Defaults to `true`.
      */
-    useConsoleLog: boolean | { info: boolean, warn: boolean, error: boolean },
+    useConsoleLog: boolean,
+
+    /**
+     * Whether to log `trace` outputs.
+     *
+     * Defaults to `false`,
+     */
+    logTrace: boolean,
 }
 
 export type PackOptions = Partial<BaseCommandOptions> & {
@@ -134,48 +139,6 @@ export type PackOptions = Partial<BaseCommandOptions> & {
 }
 
 /**
- * Options passed to a {@link FragmenterInstaller}
- */
-export type InstallOptions = Partial<BaseCommandOptions & {
-    /**
-     * Provides a custom temporary directory for use when extracting compressed modules.
-     *
-     * **Warning:** if this is specified, the caller must make sure the provided directory is unique.
-     *
-     * Defaults to a randomised directory in `os.tmpdir()`.
-     */
-    temporaryDirectory: string,
-
-    /**
-     * Maximum amount of retries when downloading a module fails.
-     *
-     * Defaults to `5`.
-     */
-    maxModuleRetries: number,
-
-    /**
-     * Whether to force a fresh install.
-     *
-     * Defaults to `false`.
-     */
-    forceFreshInstall: boolean,
-
-    /**
-     * Whether to force using cache busting for the manifest.
-     *
-     * Defaults to `false`.
-     */
-    forceManifestCacheBust: boolean,
-
-    /**
-     * Disables falling back to a full module download after exhausting the max amount of module retries.
-     *
-     * Defaults to `false`.
-     */
-    disableFallbackToFull: boolean,
-}>;
-
-/**
  * Options passed to a {@link FragmenterUpdateChecker}
  */
 export type NeedsUpdateOptions = Partial<BaseCommandOptions & {}>;
@@ -189,10 +152,14 @@ export interface FragmenterUpdateCheckerEvents {
 
 export interface FragmenterInstallerEvents {
     'error': (err: any) => void;
+    'backupStarted': () => void;
+    'backupFinished': () => void;
     'downloadStarted': (module: Module) => void;
     'downloadProgress': (module: Module, progress: DownloadProgress) => void;
+    'downloadInterrupted': (module: Module, fromUserAction: boolean) => void;
     'downloadFinished': (module: Module) => void;
     'unzipStarted': (module: Module) => void;
+    'unzipProgress': (module: Module, progress: ModuleDecompressorProgress) => void;
     'unzipFinished': (module: Module) => void;
     'copyStarted': (module: Module) => void;
     'copyProgress': (module: Module, progress: CopyProgress) => void;
@@ -200,6 +167,7 @@ export interface FragmenterInstallerEvents {
     'retryScheduled': (module: Module, retryCount: number, waitSeconds: number) => void;
     'retryStarted': (module: Module, retryCount: number) => void;
     'fullDownload': () => void;
+    'modularUpdate': () => void;
     'logInfo': (module: Module | null, ...messageBits: any[]) => void;
     'logWarn': (module: Module | null, ...messageBits: any[]) => void;
     'logError': (module: Module | null, ...messageBits: any[]) => void;
