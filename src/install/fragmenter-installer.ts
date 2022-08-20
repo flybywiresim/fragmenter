@@ -227,7 +227,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 }
 
                 const baseModule = {
-                    name: 'Base',
+                    name: 'base',
                     sourceDir: '.',
                     hash: updateInfo.distributionManifest.base.hash,
                     splitFileCount: updateInfo.distributionManifest.base.splitFileCount,
