@@ -49,6 +49,7 @@ export class FragmenterUpdateChecker extends (EventEmitter as new () => TypedEve
             addedModules: [],
             removedModules: [],
             updatedModules: [],
+            unchangedModules: [],
 
             downloadSize: undefined,
             requiredDiskSpace: undefined,
@@ -83,6 +84,9 @@ export class FragmenterUpdateChecker extends (EventEmitter as new () => TypedEve
         updateInfo.updatedModules = existingInstall.modules.filter((e) => !distribution.modules.find((f) => e.hash === f.hash)
             && !updateInfo.addedModules.includes(e)
             && !updateInfo.removedModules.includes(e));
+        updateInfo.unchangedModules = existingInstall.modules.filter((it) => !(updateInfo.addedModules.includes(it))
+            && !(updateInfo.removedModules.includes(it))
+            && !(updateInfo.updatedModules.includes(it)));
 
         if (updateInfo.addedModules.length > 0 || updateInfo.removedModules.length > 0 || updateInfo.updatedModules.length > 0) {
             updateInfo.needsUpdate = true;

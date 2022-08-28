@@ -57,6 +57,7 @@ export interface UpdateInfo {
     addedModules: DistributionModule[];
     removedModules: DistributionModule[];
     updatedModules: DistributionModule[];
+    unchangedModules: DistributionModule[];
 
     /**
      * Download size in bytes of the update, if available
