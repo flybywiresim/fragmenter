@@ -4,6 +4,7 @@ import TypedEventEmitter from '../typed-emitter';
 import { FragmenterOperation, FragmenterPhase } from './fragmenter-operation';
 
 export interface FragmenterContextEvents {
+    'phaseChange': (phase: FragmenterPhase) => void,
     'logInfo': (...bits: any[]) => void,
     'logWarn': (...bits: any[]) => void,
     'logTrace': (...bits: any[]) => void,
@@ -15,7 +16,16 @@ export class FragmenterContext extends (EventEmitter as new () => TypedEventEmit
 
     private readonly doUseConsole: boolean;
 
-    public currentPhase: FragmenterPhase = { op: FragmenterOperation.NotStarted };
+    private phase: FragmenterPhase = { op: FragmenterOperation.NotStarted };
+
+    public get currentPhase() {
+        return this.phase;
+    }
+
+    public set currentPhase(phase: FragmenterPhase) {
+        this.phase = phase;
+        this.emit('phaseChange', this.phase);
+    }
 
     public unrecoverableErrorEncountered = false;
 

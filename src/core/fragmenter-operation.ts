@@ -30,11 +30,13 @@ interface InstallBeginPhase extends GenericFragmenterPhase {
 interface InstallModuleDownloadPhase extends GenericFragmenterPhase {
     op: FragmenterOperation.InstallModuleDownload,
     module: DistributionModule,
+    moduleIndex: number,
 }
 
 interface InstallModuleDecompressPhase extends GenericFragmenterPhase {
     op: FragmenterOperation.InstallModuleDecompress,
     module: DistributionModule,
+    moduleIndex: number,
 }
 
 interface InstallFinishPhase extends GenericFragmenterPhase {

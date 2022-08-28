@@ -169,6 +169,7 @@ export interface FragmenterInstallerEvents {
     'retryStarted': (module: Module, retryCount: number) => void;
     'fullDownload': () => void;
     'modularUpdate': () => void;
+    'cancelled': () => void;
     'logInfo': (module: Module | null, ...messageBits: any[]) => void;
     'logWarn': (module: Module | null, ...messageBits: any[]) => void;
     'logError': (module: Module | null, ...messageBits: any[]) => void;

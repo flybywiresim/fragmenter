@@ -85,7 +85,12 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         try {
             return await this.doInstall();
         } catch (e) {
-            this.ctx.logError('[FragmenterInstaller] Error during install. See exception below');
+            if (FragmenterError.isFragmenterError(e) && e.code === FragmenterErrorCode.UserAborted) {
+                this.ctx.logError('[FragmenterInstaller] Install aborted');
+                this.emit('cancelled');
+            } else {
+                this.ctx.logError('[FragmenterInstaller] Error during install. See exception below');
+            }
 
             let backedUpInstallFilesExist = false;
             try {
@@ -180,7 +185,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             completeFileSizeUncompressed: updateInfo.distributionManifest.fullCompleteFileSizeUncompressed,
         };
 
-        await this.downloadAndInstallModule(fullModule);
+        await this.downloadAndInstallModule(fullModule, 0, updateInfo.distributionManifest.fullHash);
 
         return {
             ...updateInfo.distributionManifest,
@@ -189,6 +194,8 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
     }
 
     private async performModularUpdate(updateInfo: UpdateInfo): Promise<InstallManifest> {
+        let moduleIndex = 0;
+
         this.emit('modularUpdate');
 
         await this.ensureTempDirExists();
@@ -214,18 +221,6 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             this.ctx.logInfo('[FragmenterInstaller] Base files changed - updating');
 
             try {
-                for (const file of updateInfo.existingManifest.base.files) {
-                    const absolutePath = path.join(this.options.temporaryDirectory, file);
-
-                    try {
-                        await fs.access(absolutePath);
-
-                        await promisify(fs.rm)(absolutePath);
-                    } catch (e) {
-                        // noop
-                    }
-                }
-
                 const baseModule = {
                     name: 'base',
                     sourceDir: '.',
@@ -235,7 +230,28 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                     completeFileSizeUncompressed: updateInfo.distributionManifest.base.completeFileSizeUncompressed,
                 };
 
-                await this.downloadAndInstallModule(baseModule);
+                await this.downloadAndInstallModule(baseModule, moduleIndex, updateInfo.distributionManifest.fullHash, false);
+                moduleIndex++;
+
+                const { files } = updateInfo.distributionManifest.base;
+
+                this.emit('copyStarted', baseModule);
+                let moved = 0;
+                for (const file of files) {
+                    const absoluteSourcePath = path.join(this.options.temporaryDirectory, 'extract', 'base', file);
+                    const absoluteDestPath = path.join(this.destDir, file);
+
+                    try {
+                        await fs.move(absoluteSourcePath, absoluteDestPath);
+
+                        this.emit('copyProgress', baseModule, { moved: ++moved, total: files.length });
+                    } catch (e) {
+                        this.ctx.logError(`[FragmenterInstaller] Error while moving over file '${absoluteSourcePath}' -> '${absoluteDestPath}'`);
+
+                        throw FragmenterError.createFromError(e);
+                    }
+                }
+                this.emit('copyFinished', baseModule);
 
                 newInstallManifest.base = updateInfo.distributionManifest.base;
             } catch (e) {
@@ -248,33 +264,39 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 throw e;
             }
         } else {
-            this.ctx.logTrace('[FragmenterInstaller] Base files not changed');
+            this.ctx.logTrace('[FragmenterInstaller] Base files not changed - moving them back over');
+
+            const baseModule = {
+                name: 'base',
+                sourceDir: '.',
+                hash: updateInfo.distributionManifest.base.hash,
+                splitFileCount: updateInfo.distributionManifest.base.splitFileCount,
+                completeFileSize: updateInfo.distributionManifest.base.completeFileSize,
+                completeFileSizeUncompressed: updateInfo.distributionManifest.base.completeFileSizeUncompressed,
+            };
+
+            const { files } = updateInfo.existingManifest.base;
+
+            let moved = 0;
+            for (const file of files) {
+                const absoluteSourcePath = path.resolve(this.options.temporaryDirectory, 'restore', file);
+                const absoluteDestPath = path.resolve(this.destDir, file);
+
+                try {
+                    await fs.move(absoluteSourcePath, absoluteDestPath);
+
+                    this.emit('copyProgress', baseModule, { moved: ++moved, total: files.length });
+                } catch (e) {
+                    this.ctx.logError(`[FragmenterInstaller] Error while moving over file '${absoluteSourcePath}' -> '${absoluteDestPath}'`);
+
+                    throw FragmenterError.createFromError(e);
+                }
+            }
         }
 
         newInstallManifest.modules = updateInfo.existingManifest.modules;
 
         for (const module of [...updateInfo.removedModules, ...updateInfo.updatedModules]) {
-            this.ctx.logInfo(`[FragmenterInstaller] Removing module '${module.name}'`);
-
-            const fullPath = path.join(this.destDir, module.sourceDir);
-
-            let moduleDirExists = false;
-            try {
-                await fs.access(fullPath);
-
-                moduleDirExists = true;
-            } catch (e) {
-                // noop
-            }
-
-            if (moduleDirExists) {
-                await promisify(fs.rm)(fullPath, { recursive: true });
-
-                this.ctx.logTrace(`[FragmenterInstaller] Done removing module '${module.name}'`);
-            } else {
-                this.ctx.logWarn(`[FragmenterInstaller] Module '${module.name}' marked for removal not found`);
-            }
-
             const moduleIndexInManifest = newInstallManifest.modules.findIndex((m) => m.name === module.name);
 
             newInstallManifest.modules.splice(moduleIndexInManifest, 1);
@@ -288,7 +310,16 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
                 newInstallManifest.modules.push(newModule);
 
-                await this.downloadAndInstallModule(newModule);
+                await this.downloadAndInstallModule(newModule, moduleIndex, updateInfo.distributionManifest.fullHash);
+                moduleIndex++;
+            }
+
+            for (const module of updateInfo.unchangedModules) {
+                const newModule = updateInfo.distributionManifest.modules.find((m) => m.name === module.name);
+
+                this.ctx.logInfo(`[FragmenterInstaller] Moving back unchanged module '${newModule.name}'`);
+
+                await this.moveOverBackedUpFiles(module);
             }
 
             newInstallManifest.fullHash = updateInfo.distributionManifest.fullHash;
@@ -307,11 +338,11 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         return newInstallManifest;
     }
 
-    async downloadAndInstallModule(module: DistributionModule): Promise<void> {
+    async downloadAndInstallModule(module: DistributionModule, moduleIndex: number, fullModuleHash: string, move = true): Promise<void> {
         let retryCount = 0;
         while (retryCount < 5) {
             try {
-                await this.tryDownloadAndInstallModule(module);
+                await this.tryDownloadAndInstallModule(module, moduleIndex, retryCount, fullModuleHash, move);
 
                 return;
             } catch (e) {
@@ -352,12 +383,12 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         );
     }
 
-    private async tryDownloadAndInstallModule(module: DistributionModule): Promise<void> {
+    private async tryDownloadAndInstallModule(module: DistributionModule, moduleIndex: number, retryCount: number, fullModuleHash: string, move = true): Promise<void> {
         this.ctx.logInfo(`[FragmenterInstaller] Downloading and installing module '${module.name}'`);
 
         this.emit('downloadStarted', module);
 
-        const downloader = new ModuleDownloader(this.ctx, this.baseUrl, module);
+        const downloader = new ModuleDownloader(this.ctx, this.baseUrl, module, moduleIndex, retryCount, fullModuleHash);
 
         downloader.on('progress', (p) => {
             const pct = Math.round((p.loaded / p.total) * 100);
@@ -375,7 +406,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
         this.emit('downloadFinished', module);
 
-        const decompressor = new ModuleDecompressor(this.ctx, module);
+        const decompressor = new ModuleDecompressor(this.ctx, module, moduleIndex);
 
         decompressor.on('progress', (p) => this.emit('unzipProgress', module, p));
 
@@ -386,11 +417,13 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         await decompressor.decompress(moduleZipPath, extractDir);
         this.emit('unzipFinished', module);
 
-        this.emit('copyStarted', module);
-        await this.moveOverExtractedFiles(module);
-        this.emit('copyFinished', module);
+        if (move) {
+            this.emit('copyStarted', module);
+            await this.moveOverExtractedFiles(module);
+            this.emit('copyFinished', module);
 
-        await this.cleanupTempModuleFiles(module);
+            await this.cleanupTempModuleFiles(module);
+        }
 
         this.ctx.logTrace(`[FragmenterInstaller] Done downloading and installing module '${module.name}'`);
     }
@@ -436,17 +469,28 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         this.ctx.logTrace(`[FragmenterInstaller] Done cleaning up temporary module files for '${module.name}'`);
     }
 
+    private async moveOverBackedUpFiles(module: DistributionModule) {
+        const restoreDir = path.join(this.options.temporaryDirectory, 'restore', module.sourceDir);
+        const destModuleDir = path.join(this.destDir, module.sourceDir);
+
+        await this.moveOverModuleFiles(module, restoreDir, destModuleDir);
+    }
+
     private async moveOverExtractedFiles(module: DistributionModule) {
         const extractedDir = path.join(this.options.temporaryDirectory, 'extract', module.name);
         const destModuleDir = path.join(this.destDir, module.sourceDir);
 
-        this.ctx.logInfo(`[FragmenterInstaller] Moving files from '${extractedDir}' -> '${destModuleDir}'`);
+        await this.moveOverModuleFiles(module, extractedDir, destModuleDir);
+    }
 
-        const files = readRecurse(extractedDir);
+    private async moveOverModuleFiles(module: DistributionModule, sourceDir: string, destModuleDir: string) {
+        this.ctx.logInfo(`[FragmenterInstaller] Moving files from '${sourceDir}' -> '${destModuleDir}'`);
+
+        const files = readRecurse(sourceDir);
 
         let moved = 0;
         for (const file of files) {
-            const absoluteSourcePath = path.resolve(extractedDir, file);
+            const absoluteSourcePath = path.resolve(sourceDir, file);
             const absoluteDestPath = path.resolve(destModuleDir, file);
 
             try {

@@ -21,13 +21,14 @@ export class ModuleDecompressor extends (EventEmitter as new () => TypedEventEmi
     constructor(
         private readonly ctx: FragmenterContext,
         private readonly module: DistributionModule,
+        private readonly moduleIndex: number,
     ) {
         // eslint-disable-next-line constructor-super
         super();
     }
 
     async decompress(filePath: string, destDir: string): Promise<boolean> {
-        this.ctx.currentPhase = { op: FragmenterOperation.InstallModuleDecompress, module: this.module };
+        this.ctx.currentPhase = { op: FragmenterOperation.InstallModuleDecompress, module: this.module, moduleIndex: this.moduleIndex };
 
         let entryIndex = 0;
 
@@ -40,7 +41,7 @@ export class ModuleDecompressor extends (EventEmitter as new () => TypedEventEmi
         });
 
         try {
-            this.ctx.logInfo(`[ModuleDecompressor] Extracting module file at '${filePath}'`);
+            this.ctx.logInfo(`[ModuleDecompressor] Extracting module file at '${filePath}' -> '${destDir}'`);
 
             await unzip.extract(filePath, destDir);
 

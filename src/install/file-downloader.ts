@@ -22,21 +22,28 @@ export interface FileDownloaderResult {
 export class FileDownloader extends (EventEmitter as new () => TypedEventEmitter<FileDownloaderEvents>) {
     constructor(
         private readonly ctx: FragmenterContext,
-        private readonly url: string,
+        private readonly fileUrl: string,
+        private readonly forceCacheBust: boolean,
     ) {
         // eslint-disable-next-line constructor-super
         super();
     }
 
     async download(dest: string): Promise<FileDownloaderResult> {
-        this.ctx.logInfo(`[FileDownloader] Downloading file at '${this.url}'`);
+        let url = this.fileUrl;
+
+        if (this.forceCacheBust || this.ctx.options.forceCacheBust) {
+            url += `&cache=${Math.round(Math.random() * 999999999)}`;
+        }
+
+        this.ctx.logInfo(`[FileDownloader] Downloading file at '${url}'`);
 
         const ret: FileDownloaderResult = {
             bytesDownloaded: 0,
             error: undefined,
         };
 
-        const headData = await FileDownloader.getHeaders(this.url);
+        const headData = await FileDownloader.getHeaders(url);
 
         let fileSize: number | undefined;
         const contentLength = parseInt(headData.headers['content-length']);
@@ -49,10 +56,10 @@ export class FileDownloader extends (EventEmitter as new () => TypedEventEmitter
 
         const serverSupportsRanges = headData.headers['accept-ranges']?.includes('bytes') ?? false;
         if (!serverSupportsRanges) {
-            this.ctx.logWarn('Server does not seem to support byte ranges - file download retries will be less less efficient');
+            this.ctx.logWarn('[FileDownloader] Server does not seem to support byte ranges - file download retries will be less less efficient');
         }
 
-        const fileStreamDownloader = new StreamDownloader(this.ctx, this.url);
+        const fileStreamDownloader = new StreamDownloader(this.ctx, url);
 
         let loadedBytes = 0;
         let retryCount = 0;

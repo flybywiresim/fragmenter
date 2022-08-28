@@ -32,6 +32,9 @@ export class ModuleDownloader extends (EventEmitter as new () => TypedEventEmitt
         private readonly ctx: FragmenterContext,
         private readonly baseUrl: string,
         private readonly module: DistributionModule,
+        private readonly moduleIndex: number,
+        private readonly retryCount: number,
+        private readonly fullModuleHash: string,
     ) {
         // eslint-disable-next-line constructor-super
         super();
@@ -40,7 +43,7 @@ export class ModuleDownloader extends (EventEmitter as new () => TypedEventEmitt
     private probedModuleFileSize: number;
 
     async startDownload(destDir: string): Promise<boolean> {
-        this.ctx.currentPhase = { op: FragmenterOperation.InstallModuleDownload, module: this.module };
+        this.ctx.currentPhase = { op: FragmenterOperation.InstallModuleDownload, module: this.module, moduleIndex: this.moduleIndex };
 
         this.probedModuleFileSize = await this.probeModuleCompleteFileSize();
 
@@ -91,9 +94,15 @@ export class ModuleDownloader extends (EventEmitter as new () => TypedEventEmitt
     private async downloadModuleFile(destDir: string): Promise<boolean> {
         const fileName = `${this.module.name}.zip`;
 
-        const url = urljoin(this.baseUrl, fileName);
+        const fileUrl = urljoin(this.baseUrl, fileName);
 
-        const downloader = new FileDownloader(this.ctx, url);
+        let url = `${fileUrl}?moduleHash=${this.module.hash.substring(0, 8)}&fullHash=${this.fullModuleHash.substring(0, 8)}`;
+
+        if (this.retryCount) {
+            url += `&retry=${this.retryCount}`;
+        }
+
+        const downloader = new FileDownloader(this.ctx, url, this.retryCount > 0);
 
         // eslint-disable-next-line no-loop-func
         downloader.on('progress', (loaded) => {
@@ -122,13 +131,11 @@ export class ModuleDownloader extends (EventEmitter as new () => TypedEventEmitt
 
             return true;
         } catch (e) {
+            this.ctx.logError(`[ModuleDownloader] module download at '${url}' failed`, e.message);
+
             if (this.ctx.unrecoverableErrorEncountered) {
                 this.ctx.logTrace('[ModuleDownloader] file download error was unrecoverable - abandoning module download');
-
-                throw e;
             }
-
-            this.ctx.logError(`[ModuleDownloader] module download at '${url}' failed`, e.message);
 
             try {
                 await fs.access(filePath);
@@ -136,9 +143,9 @@ export class ModuleDownloader extends (EventEmitter as new () => TypedEventEmitt
             } catch (e) {
                 // noop
             }
-        }
 
-        throw new Error('Part download failed - max number of retries reached');
+            throw e;
+        }
     }
 
     private async downloadModuleFileParts(destDir: string): Promise<boolean> {
@@ -155,7 +162,13 @@ export class ModuleDownloader extends (EventEmitter as new () => TypedEventEmitt
 
             const partUrl = urljoin(this.baseUrl, partFileName);
 
-            const partDownloader = new FileDownloader(this.ctx, partUrl);
+            let url = `${partUrl}?moduleHash=${this.module.hash.substring(0, 8)}&fullHash=${this.fullModuleHash.substring(0, 8)}&partIndex=${i}`;
+
+            if (this.retryCount) {
+                url += `&retry=${this.retryCount}`;
+            }
+
+            const partDownloader = new FileDownloader(this.ctx, url, this.retryCount > 0);
 
             // eslint-disable-next-line no-loop-func
             partDownloader.on('progress', (loaded, total) => {
@@ -184,6 +197,12 @@ export class ModuleDownloader extends (EventEmitter as new () => TypedEventEmitt
 
                 totalLoaded += bytesDownloaded;
             } catch (e) {
+                this.ctx.logError(`[ModuleDownloader] part download at '${url}' failed`, e.message);
+
+                if (this.ctx.unrecoverableErrorEncountered) {
+                    this.ctx.logTrace('[ModuleDownloader] file download error was unrecoverable - abandoning module download');
+                }
+
                 try {
                     await promisify(fs.rm)(filePath);
                 } catch (e) {
