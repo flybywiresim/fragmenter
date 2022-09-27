@@ -164,8 +164,6 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             newInstallManifest = await this.performModularUpdate(updateInfo);
         }
 
-        this.ctx.currentPhase = { op: FragmenterOperation.InstallFinish };
-
         return this.finishInstall(newInstallManifest);
     }
 
@@ -186,6 +184,8 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         };
 
         await this.downloadAndInstallModule(fullModule, 0, updateInfo.distributionManifest.fullHash);
+
+        this.ctx.currentPhase = { op: FragmenterOperation.InstallFinish };
 
         return {
             ...updateInfo.distributionManifest,
@@ -313,6 +313,8 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 await this.downloadAndInstallModule(newModule, moduleIndex, updateInfo.distributionManifest.fullHash);
                 moduleIndex++;
             }
+
+            this.ctx.currentPhase = { op: FragmenterOperation.InstallFinish };
 
             for (const module of updateInfo.unchangedModules) {
                 const newModule = updateInfo.distributionManifest.modules.find((m) => m.name === module.name);
