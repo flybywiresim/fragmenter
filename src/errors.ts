@@ -1,6 +1,7 @@
 export enum FragmenterErrorCode {
     Null,
     PermissionsError,
+    ResourcesBusy,
     NoSpaceOnDevice,
     MaxModuleRetries,
     FileNotFound,
@@ -9,7 +10,7 @@ export enum FragmenterErrorCode {
     ModuleJsonInvalid,
     ModuleCrcMismatch,
     UserAborted,
-    DownloadStreamClosed,
+    NetworkError,
     CorruptedZipFile,
     Unknown,
 }
@@ -68,6 +69,8 @@ export class FragmenterError extends Error {
         case 'EACCES':
         case 'EPERM':
             return FragmenterErrorCode.PermissionsError;
+        case 'EBUSY':
+            return FragmenterErrorCode.ResourcesBusy;
         case 'ENOSPC':
             return FragmenterErrorCode.NoSpaceOnDevice;
         case 'ENOENT':
@@ -76,6 +79,9 @@ export class FragmenterError extends Error {
             return FragmenterErrorCode.DirectoryNotEmpty;
         case 'ENOTDIR':
             return FragmenterErrorCode.NotADirectory;
+        case 'ECONNRESET':
+        case 'ENOTFOUND':
+            return FragmenterErrorCode.NetworkError;
         default:
             return FragmenterErrorCode.Unknown;
         }
