@@ -296,6 +296,17 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
         newInstallManifest.modules = updateInfo.existingManifest.modules;
 
+        const moduleRatio = (updateInfo.updatedModules.length + updateInfo.addedModules.length) / Math.max(1, updateInfo.existingManifest.modules.length);
+
+        // Force a full install if the ratio is above the configured threshold, if applicable
+        if (updateInfo.distributionManifest.forceFullInstallRatio !== undefined && moduleRatio > updateInfo.distributionManifest.forceFullInstallRatio) {
+            this.emit('fullDownload');
+
+            this.ctx.logInfo('[FragmenterInstaller] Ratio of updated and added modules to total module count above limit, forcing full install');
+
+            return this.performFullInstall(updateInfo);
+        }
+
         for (const module of [...updateInfo.removedModules, ...updateInfo.updatedModules]) {
             const moduleIndexInManifest = newInstallManifest.modules.findIndex((m) => m.name === module.name);
 

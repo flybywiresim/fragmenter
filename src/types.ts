@@ -22,6 +22,7 @@ export interface DistributionManifest {
     fullSplitFileCount?: number;
     fullCompleteFileSize?: number;
     fullCompleteFileSizeUncompressed?: number;
+    forceFullInstallRatio?: number;
 }
 
 export interface InstallManifest extends DistributionManifest {
@@ -137,6 +138,13 @@ export type PackOptions = Partial<BaseCommandOptions> & {
      * Defaults to `true`.
      */
     keepCompleteModulesAfterSplit?: boolean,
+
+    /**
+     * Defines a ratio of (updated modules + added modules) to (total modules before update) after which a full install is forced
+     *
+     * Defaults to 1.
+     */
+    forceFullInstallRatio?: number;
 }
 
 /**
