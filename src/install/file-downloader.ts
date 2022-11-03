@@ -69,6 +69,10 @@ export class FileDownloader extends (EventEmitter as new () => TypedEventEmitter
                 this.emit('progress', loadedBytes + progress, fileSize);
             });
 
+            fileStreamDownloader.on('error', (error) => {
+                this.emit('error', error);
+            });
+
             while (retryCount < 5) {
                 const writeStream = fs.createWriteStream(dest, { flags: 'a' });
 
@@ -96,6 +100,10 @@ export class FileDownloader extends (EventEmitter as new () => TypedEventEmitter
                     }
 
                     this.emit('downloadInterrupted', false);
+
+                    if (error) {
+                        this.emit('error', error);
+                    }
 
                     this.ctx.logInfo(`[FileDownloader] file not entirely downloaded (${downloadPercentage}%) - retrying in ${2 ** retryCount}s`);
                 }

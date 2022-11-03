@@ -186,6 +186,10 @@ export class ModuleDownloader extends (EventEmitter as new () => TypedEventEmitt
                 this.emit('downloadInterrupted', fromUserAction);
             });
 
+            partDownloader.on('error', (error) => {
+                this.emit('error', error);
+            });
+
             const filePath = path.join(destDir, `${this.module.name}.zip.fg-tmp${partIndexString}`);
 
             try {

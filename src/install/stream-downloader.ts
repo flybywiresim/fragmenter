@@ -8,6 +8,7 @@ import { FragmenterContext } from '../core';
 
 export interface StreamDownloaderEvents {
     'progress': (loaded: number) => void,
+    'error': (error: any) => void,
 }
 
 export interface StreamDownloaderResult {
@@ -37,6 +38,8 @@ export class StreamDownloader extends (EventEmitter as new () => TypedEventEmitt
             // TODO add cache-busting parameters
             downloadStream = await this.getReadStream(startIndex, this.downloadUrl);
         } catch (e) {
+            this.emit('error', e);
+
             this.ctx.logError('[StreamDownloader] File streaming could not be started:', e.message);
 
             writeStream.destroy();
