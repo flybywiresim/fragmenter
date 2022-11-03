@@ -522,7 +522,14 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
     private async ensureTempDirExists() {
         try {
-            const tempDirExists = await promisify(fs.exists)(this.options.temporaryDirectory);
+            let tempDirExists;
+            try {
+                await fs.access(this.options.temporaryDirectory);
+
+                tempDirExists = true;
+            } catch (e) {
+                tempDirExists = false;
+            }
 
             if (!tempDirExists) {
                 await fs.mkdir(this.options.temporaryDirectory);
