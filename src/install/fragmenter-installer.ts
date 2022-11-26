@@ -589,12 +589,23 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             const absoluteSourcePath = path.resolve(this.destDir, file);
             const absoluteDestPath = path.resolve(backupDir, file);
 
+            let alreadyExists = false;
             try {
-                await fs.move(absoluteSourcePath, absoluteDestPath);
-            } catch (e) {
-                this.ctx.logError(`[FragmenterInstaller] Error while moving over file '${absoluteSourcePath}' -> '${absoluteDestPath}'`);
+                await fs.access(absoluteDestPath);
 
-                throw FragmenterError.createFromError(e);
+                alreadyExists = true;
+            } catch (e) {
+                // noop
+            }
+
+            if (!alreadyExists) {
+                try {
+                    await fs.move(absoluteSourcePath, absoluteDestPath);
+                } catch (e) {
+                    this.ctx.logError(`[FragmenterInstaller] Error while moving over file '${absoluteSourcePath}' -> '${absoluteDestPath}'`);
+
+                    throw FragmenterError.createFromError(e);
+                }
             }
         }
 
