@@ -54,6 +54,7 @@ export interface UpdateInfo {
     needsUpdate: boolean;
     isFreshInstall: boolean;
     baseChanged: boolean;
+    willFullyReDownload: boolean;
 
     addedModules: DistributionModule[];
     removedModules: DistributionModule[];

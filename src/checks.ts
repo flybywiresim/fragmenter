@@ -43,6 +43,8 @@ export class FragmenterUpdateChecker extends (EventEmitter as new () => TypedEve
             needsUpdate: false,
             isFreshInstall: false,
             baseChanged: false,
+            willFullyReDownload: false,
+
             distributionManifest: distribution,
             existingManifest: undefined,
 
@@ -93,6 +95,15 @@ export class FragmenterUpdateChecker extends (EventEmitter as new () => TypedEve
 
             updateInfo.downloadSize = [...updateInfo.addedModules, ...updateInfo.updatedModules].reduce((accu, module) => accu + module.completeFileSize, 0);
             updateInfo.requiredDiskSpace = [...updateInfo.addedModules, ...updateInfo.updatedModules].reduce((accu, module) => accu + module.completeFileSizeUncompressed, 0);
+        }
+
+        const moduleRatio = (updateInfo.updatedModules.length + updateInfo.addedModules.length) / Math.max(1, updateInfo.existingManifest.modules.length);
+
+        // Force a full install if the ratio is above the configured threshold, if applicable
+        if (updateInfo.distributionManifest.forceFullInstallRatio !== undefined && moduleRatio > updateInfo.distributionManifest.forceFullInstallRatio) {
+            updateInfo.willFullyReDownload = true;
+            updateInfo.downloadSize = distribution.fullCompleteFileSize;
+            updateInfo.requiredDiskSpace = distribution.fullCompleteFileSizeUncompressed;
         }
 
         return updateInfo;
