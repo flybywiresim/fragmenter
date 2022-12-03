@@ -58,6 +58,13 @@ export type InstallOptions = Partial<{
      * Defaults to `false`.
      */
     disableFallbackToFull: boolean,
+
+    /**
+     * The ratio at which to force a full install.
+     *
+     * Default turns this behaviour off; 0.5 means more than half of total modules updated or added leads to a full install.
+     */
+    forceFullInstallRatio: number,
 }>;
 
 export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEmitter<FragmenterInstallerEvents>) {
