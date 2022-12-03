@@ -100,7 +100,7 @@ export class FragmenterUpdateChecker extends (EventEmitter as new () => TypedEve
         const moduleRatio = (updateInfo.updatedModules.length + updateInfo.addedModules.length) / Math.max(1, updateInfo.existingManifest.modules.length);
 
         // Force a full install if the ratio is above the configured threshold, if applicable
-        if (updateInfo.distributionManifest.forceFullInstallRatio !== undefined && moduleRatio > updateInfo.distributionManifest.forceFullInstallRatio) {
+        if (options.forceFullInstallRatio !== undefined && moduleRatio > options.forceFullInstallRatio) {
             updateInfo.willFullyReDownload = true;
             updateInfo.downloadSize = distribution.fullCompleteFileSize;
             updateInfo.requiredDiskSpace = distribution.fullCompleteFileSizeUncompressed;

@@ -26,8 +26,6 @@ export async function pack(buildManifest: BuildManifest): Promise<DistributionMa
         splitFileSize: DEFAULT_SPLIT_FILE_SIZE,
 
         keepCompleteModulesAfterSplit: true,
-
-        forceFullInstallRatio: 1,
     };
 
     if (buildManifest.packOptions) {
@@ -188,7 +186,6 @@ export async function pack(buildManifest: BuildManifest): Promise<DistributionMa
             fullSplitFileCount: 0,
             fullCompleteFileSize: 0,
             fullCompleteFileSizeUncompressed: 0,
-            forceFullInstallRatio: options.forceFullInstallRatio,
         };
 
         // Create full zip
