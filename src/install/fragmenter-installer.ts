@@ -242,7 +242,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                     const absoluteDestPath = path.join(this.destDir, file);
 
                     try {
-                        await fs.move(absoluteSourcePath, absoluteDestPath);
+                        await fs.move(absoluteSourcePath, absoluteDestPath, { overwrite: true });
 
                         this.emit('copyProgress', baseModule, { moved: ++moved, total: files.length });
                     } catch (e) {
@@ -283,7 +283,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
                 const absoluteDestPath = path.resolve(this.destDir, file);
 
                 try {
-                    await fs.move(absoluteSourcePath, absoluteDestPath);
+                    await fs.move(absoluteSourcePath, absoluteDestPath, { overwrite: true });
 
                     this.emit('copyProgress', baseModule, { moved: ++moved, total: files.length });
                 } catch (e) {
@@ -496,7 +496,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             const absoluteDestPath = path.resolve(destModuleDir, file);
 
             try {
-                await fs.move(absoluteSourcePath, absoluteDestPath);
+                await fs.move(absoluteSourcePath, absoluteDestPath, { overwrite: true });
 
                 this.emit('copyProgress', module, { moved: ++moved, total: files.length });
             } catch (e) {
@@ -589,7 +589,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
             if (!alreadyExists) {
                 try {
-                    await fs.move(absoluteSourcePath, absoluteDestPath);
+                    await fs.move(absoluteSourcePath, absoluteDestPath, { overwrite: true });
                 } catch (e) {
                     this.ctx.logError(`[FragmenterInstaller] Error while moving over file '${absoluteSourcePath}' -> '${absoluteDestPath}'`);
 
@@ -615,7 +615,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             const absoluteDestPath = path.resolve(this.destDir, file);
 
             try {
-                await fs.move(absoluteSourcePath, absoluteDestPath);
+                await fs.move(absoluteSourcePath, absoluteDestPath, { overwrite: true });
             } catch (e) {
                 this.ctx.logError(`[FragmenterInstaller] Error while moving over file '${absoluteSourcePath}' -> '${absoluteDestPath}'`);
 
