@@ -1,6 +1,6 @@
 import EventEmitter from 'events';
 import fs from 'fs-extra';
-import Axios, { AxiosResponse } from 'axios';
+import Axios, { AxiosRequestHeaders, AxiosResponse } from 'axios';
 import stream from 'stream';
 import TypedEventEmitter from '../typed-emitter';
 import { FragmenterError, FragmenterErrorCode, UnrecoverableErrors } from '../errors';
@@ -99,8 +99,14 @@ export class StreamDownloader extends (EventEmitter as new () => TypedEventEmitt
     }
 
     private async getReadStream(startIndex: number, url: string): Promise<AxiosResponse<stream.Readable>> {
+        const headers: AxiosRequestHeaders = {};
+
+        if (startIndex !== 0) {
+            headers.Range = `bytes=${startIndex}-`;
+        }
+
         const response = await Axios.get(url, {
-            headers: { Range: `bytes=${startIndex}-` },
+            headers,
             responseType: 'stream',
             signal: this.ctx.signal,
         });
