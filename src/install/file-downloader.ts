@@ -2,6 +2,7 @@ import EventEmitter from 'events';
 import fs from 'fs-extra';
 import Axios, { AxiosResponse } from 'axios';
 import stream from 'stream';
+import { Buffer } from 'buffer';
 import TypedEventEmitter from '../typed-emitter';
 import { StreamDownloader } from './stream-downloader';
 import { timer } from '../utils';
@@ -73,15 +74,14 @@ export class FileDownloader extends (EventEmitter as new () => TypedEventEmitter
                 this.emit('error', error);
             });
 
+            const fileChunks: Buffer[] = [];
+
             while (retryCount < 5) {
-                const writeStream = fs.createWriteStream(dest, { flags: 'a' });
+                const { buffers, error } = await fileStreamDownloader.downloadFrom(loadedBytes);
 
-                const {
-                    bytesWritten,
-                    error,
-                } = await fileStreamDownloader.downloadFrom(loadedBytes, writeStream);
+                fileChunks.push(...buffers);
 
-                loadedBytes += bytesWritten;
+                loadedBytes = fileChunks.reduce((acc, buf) => acc + buf.length, 0);
 
                 if (loadedBytes >= fileSize) {
                     break;
@@ -105,7 +105,7 @@ export class FileDownloader extends (EventEmitter as new () => TypedEventEmitter
                         this.emit('error', error);
                     }
 
-                    this.ctx.logInfo(`[FileDownloader] file not entirely downloaded (${downloadPercentage}%) - retrying in ${2 ** retryCount}s`);
+                    this.ctx.logInfo(`[FileDownloader] file not entirely downloaded (${downloadPercentage}%, ${loadedBytes}/${fileSize}) - retrying in ${2 ** retryCount}s`);
                 }
 
                 retryCount++;
@@ -121,27 +121,30 @@ export class FileDownloader extends (EventEmitter as new () => TypedEventEmitter
                     );
                 }
             }
+
+            await fs.writeFile(dest, Buffer.concat(fileChunks));
         } else {
             fileStreamDownloader.on('progress', (progress) => {
                 this.emit('progress', progress, fileSize);
             });
 
+            const fileChunks: Buffer[] = [];
+
             while (retryCount < 5) {
-                const writeStream = fs.createWriteStream(dest, { flags: 'a' });
+                fileChunks.length = 0; // We are not downloading ranges, so reset the file chunks
 
-                const {
-                    bytesWritten,
-                    error,
-                } = await fileStreamDownloader.downloadFrom(0, writeStream);
+                const { buffers, error } = await fileStreamDownloader.downloadFrom(0);
 
-                loadedBytes = bytesWritten;
+                fileChunks.push(...buffers);
+
+                loadedBytes = fileChunks.reduce((acc, buf) => acc + buf.length, 0);
 
                 if (loadedBytes >= fileSize) {
                     break;
                 } else {
                     const downloadPercentage = Math.round((loadedBytes / fileSize) * 100);
 
-                    this.ctx.logInfo(`[FileDownloader] file not entirely downloaded (${downloadPercentage}%) - retrying in ${2 ** retryCount}s`);
+                    this.ctx.logInfo(`[FileDownloader] file not entirely downloaded (${downloadPercentage}%, ${loadedBytes}/${fileSize}) - retrying in ${2 ** retryCount}s`);
 
                     if (this.ctx.unrecoverableErrorEncountered) {
                         ret.error = error;
@@ -162,6 +165,8 @@ export class FileDownloader extends (EventEmitter as new () => TypedEventEmitter
                     );
                 }
             }
+
+            await fs.writeFile(dest, Buffer.concat(fileChunks));
         }
 
         ret.bytesDownloaded = loadedBytes;

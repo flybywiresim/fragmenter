@@ -1,7 +1,7 @@
 import EventEmitter from 'events';
-import fs from 'fs-extra';
 import Axios, { AxiosRequestHeaders, AxiosResponse } from 'axios';
 import stream from 'stream';
+import { Buffer } from 'buffer';
 import TypedEventEmitter from '../typed-emitter';
 import { FragmenterError, FragmenterErrorCode, UnrecoverableErrors } from '../errors';
 import { FragmenterContext } from '../core';
@@ -12,6 +12,7 @@ export interface StreamDownloaderEvents {
 }
 
 export interface StreamDownloaderResult {
+    buffers: Buffer[],
     bytesWritten: number,
     error?: FragmenterError,
 }
@@ -25,8 +26,9 @@ export class StreamDownloader extends (EventEmitter as new () => TypedEventEmitt
         super();
     }
 
-    async downloadFrom(startIndex: number, writeStream: fs.WriteStream): Promise<StreamDownloaderResult> {
+    async downloadFrom(startIndex: number): Promise<StreamDownloaderResult> {
         const ret: StreamDownloaderResult = {
+            buffers: [],
             bytesWritten: 0,
             error: undefined,
         };
@@ -42,11 +44,10 @@ export class StreamDownloader extends (EventEmitter as new () => TypedEventEmitt
 
             this.ctx.logError('[StreamDownloader] File streaming could not be started:', e.message);
 
-            writeStream.destroy();
-
             // todo warn
 
             return {
+                buffers: [],
                 bytesWritten: 0,
                 error: FragmenterError.createFromError(e),
             };
@@ -54,9 +55,9 @@ export class StreamDownloader extends (EventEmitter as new () => TypedEventEmitt
 
         try {
             await new Promise((resolve, reject) => {
-                writeStream.on('close', resolve);
+                downloadStream.data.on('close', resolve);
 
-                downloadStream.data.on('close', () => {
+                downloadStream.data.on('fini', () => {
                     if (this.ctx.signal.aborted) {
                         reject(FragmenterError.create(FragmenterErrorCode.UserAborted, 'AbortSignal triggered'));
                     }
@@ -64,6 +65,7 @@ export class StreamDownloader extends (EventEmitter as new () => TypedEventEmitt
 
                 downloadStream.data.on('data', (buffer: Buffer) => {
                     ret.bytesWritten += buffer.length;
+                    ret.buffers.push(buffer);
 
                     this.emit('progress', ret.bytesWritten);
                 });
@@ -73,14 +75,6 @@ export class StreamDownloader extends (EventEmitter as new () => TypedEventEmitt
 
                     reject(FragmenterError.createFromError(e));
                 });
-
-                writeStream.on('error', (e) => {
-                    this.ctx.logError('[StreamDownloader] write stream interrupted:', e.message);
-
-                    reject(FragmenterError.createFromError(e));
-                });
-
-                downloadStream.data.pipe(writeStream);
             });
         } catch (e) {
             ret.error = e;
@@ -92,7 +86,6 @@ export class StreamDownloader extends (EventEmitter as new () => TypedEventEmitt
             }
         } finally {
             downloadStream.data.destroy();
-            writeStream.destroy();
         }
 
         return ret;
