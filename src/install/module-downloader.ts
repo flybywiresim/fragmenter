@@ -9,7 +9,7 @@ import Axios from 'axios';
 import { FileDownloader } from './file-downloader';
 import { DistributionModule } from '../types';
 import TypedEventEmitter from '../typed-emitter';
-import { FragmenterError, FragmenterErrorCode, UnrecoverableErrors } from '../errors';
+import { FragmenterError } from '../errors';
 import { FragmenterContext, FragmenterOperation } from '../core';
 
 export interface ModuleDownloaderProgress {
@@ -134,7 +134,7 @@ export class ModuleDownloader extends (EventEmitter as new () => TypedEventEmitt
             this.ctx.logError(`[ModuleDownloader] module download at '${url}' failed`, e.message);
 
             if (this.ctx.unrecoverableErrorEncountered) {
-                this.ctx.logTrace('[ModuleDownloader] file download error was unrecoverable - abandoning module download');
+                this.ctx.logInfo('[ModuleDownloader] file download error was unrecoverable - abandoning module download');
             }
 
             try {
@@ -204,7 +204,7 @@ export class ModuleDownloader extends (EventEmitter as new () => TypedEventEmitt
                 this.ctx.logError(`[ModuleDownloader] part download at '${url}' failed`, e.message);
 
                 if (this.ctx.unrecoverableErrorEncountered) {
-                    this.ctx.logTrace('[ModuleDownloader] file download error was unrecoverable - abandoning module download');
+                    this.ctx.logError('[ModuleDownloader] file download error was unrecoverable - abandoning module download');
                 }
 
                 try {
@@ -253,10 +253,7 @@ export class ModuleDownloader extends (EventEmitter as new () => TypedEventEmitt
             } catch (e) {
                 this.ctx.logError('[ModuleDownloader] File merge failed:', e.message);
 
-                if (FragmenterError.isFragmenterError(e) && UnrecoverableErrors.includes(e.code)) {
-                    this.ctx.logError(`[ModuleDownloader] File merge error is unrecoverable (${FragmenterErrorCode[e.code]}) - not trying to resume the download`);
-                    return false;
-                }
+                throw e;
             } finally {
                 partFileReadStream.destroy();
                 completeModuleFileWriteStream.destroy();

@@ -55,11 +55,11 @@ export class StreamDownloader extends (EventEmitter as new () => TypedEventEmitt
 
         try {
             await new Promise((resolve, reject) => {
-                downloadStream.data.on('close', resolve);
-
-                downloadStream.data.on('fini', () => {
+                downloadStream.data.on('close', () => {
                     if (this.ctx.signal.aborted) {
                         reject(FragmenterError.create(FragmenterErrorCode.UserAborted, 'AbortSignal triggered'));
+                    } else {
+                        resolve(undefined);
                     }
                 });
 

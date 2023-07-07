@@ -93,7 +93,7 @@ export class FileDownloader extends (EventEmitter as new () => TypedEventEmitter
                     const downloadPercentage = Math.round((loadedBytes / fileSize) * 100);
 
                     if (this.ctx.unrecoverableErrorEncountered) {
-                        this.ctx.logTrace('[FileDownloader] stream download error was unrecoverable - abandoning file download');
+                        this.ctx.logError('[FileDownloader] stream download error was unrecoverable - abandoning file download');
 
                         ret.error = error;
                         break;

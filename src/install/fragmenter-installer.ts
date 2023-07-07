@@ -409,7 +409,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             this.emit('downloadInterrupted', module, fromUserAction);
         });
 
-        downloader.on('error', (e) => this.emit('error', e));
+        downloader.on('error', (e) => this.emit('error', JSON.parse(JSON.stringify(e))));
 
         await downloader.startDownload(this.options.temporaryDirectory);
 

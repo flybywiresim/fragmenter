@@ -31,7 +31,11 @@ export class FragmenterError extends Error {
     static createFromError(e: Error) {
         const code = this.interpretNodeException(e);
 
-        return new FragmenterError(code, `FragmenterError(${FragmenterErrorCode[code]}): ${e.message}`, e);
+        const error = new FragmenterError(code, `FragmenterError(${FragmenterErrorCode[code]}): ${e.message}`, e);
+
+        error.stack = e.stack;
+
+        return error;
     }
 
     static create(code: FragmenterErrorCode, message: string) {
