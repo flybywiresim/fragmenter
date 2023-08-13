@@ -94,6 +94,10 @@ export class StreamDownloader extends (EventEmitter as new () => TypedEventEmitt
     private async getReadStream(startIndex: number, url: string): Promise<AxiosResponse<stream.Readable>> {
         const headers: AxiosRequestHeaders = {};
 
+        if (this.ctx.options.userAgent !== undefined) {
+            headers['User-Agent'] = this.ctx.options.userAgent;
+        }
+
         if (startIndex !== 0) {
             headers.Range = `bytes=${startIndex}-`;
         }

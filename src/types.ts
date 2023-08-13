@@ -120,6 +120,13 @@ export interface BaseCommandOptions {
      * Defaults to `false`,
      */
     logTrace: boolean,
+
+    /**
+     * The user agent to use for HTTP requests.
+     *
+     * Defaults to the Axios user agent.
+     */
+    userAgent?: string,
 }
 
 export type PackOptions = Partial<BaseCommandOptions> & {

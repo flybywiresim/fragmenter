@@ -40,6 +40,7 @@ export class FragmenterContext extends (EventEmitter as new () => TypedEventEmit
             useConsoleLog: true,
             forceCacheBust: false,
             logTrace: false,
+            userAgent: undefined,
             ...options,
         };
 
