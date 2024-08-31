@@ -2,9 +2,7 @@ import fs from 'fs-extra';
 import { Zip } from 'zip-lib';
 import SplitFile from 'split-file';
 import path from 'path';
-// eslint-disable-next-line import/no-unresolved
 import readRecurse from 'fs-readdir-recursive';
-// eslint-disable-next-line import/no-unresolved
 import hasha from 'hasha';
 import {
     BuildManifest,
@@ -174,6 +172,7 @@ export async function pack(buildManifest: BuildManifest): Promise<DistributionMa
         fs.copySync(buildManifest.baseDir, tempDir);
 
         const distributionManifest: DistributionManifest = {
+            version: buildManifest.version,
             modules: [],
             base: {
                 hash: '',
