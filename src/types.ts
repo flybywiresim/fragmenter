@@ -9,6 +9,7 @@ export interface Base {
 }
 
 export interface BuildManifest {
+    version: string;
     baseDir: string;
     outDir: string;
     packOptions?: PackOptions;
@@ -16,6 +17,7 @@ export interface BuildManifest {
 }
 
 export interface DistributionManifest {
+    version?: string;
     modules: DistributionModule[];
     base: Base;
     fullHash: string;

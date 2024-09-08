@@ -51,10 +51,12 @@ describe('FragmenterInstaller', () => {
 
         installer.on('error', (e) => console.error(e));
 
-        setTimeout(() => {
+        const timeout = setTimeout(() => {
             abortController.abort();
         }, 3_000);
 
         await installer.install();
+
+        clearTimeout(timeout);
     });
 });
