@@ -15,9 +15,9 @@ afterEach(() => {
 jest.setTimeout(360_000);
 
 describe('FragmenterInstaller', () => {
-    const TEST_FILES_BASE_URL = 'https://flybywiresim.b-cdn.net/addons/fragmenter-test/';
+    const TEST_FILES_BASE_URL = 'https://flybywirecdn.com/addons/fragmenter-test/';
 
-    const FRESH_INSTALL_PATH = 'tests/installer/fresh-install-01/';
+    const FRESH_INSTALL_PATH = 'tests/out/fresh-install-01/';
 
     it('can perform a fresh install', async () => {
         const abortController = new AbortController();
