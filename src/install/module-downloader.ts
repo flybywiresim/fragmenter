@@ -7,7 +7,7 @@ import fs from 'fs-extra';
 import EventEmitter from 'events';
 import Axios from 'axios';
 import { FileDownloader } from './file-downloader';
-import { DistributionModule } from '../types';
+import { DistributionModule, DistributionModuleFile } from '../types';
 import TypedEventEmitter from '../typed-emitter';
 import { FragmenterError } from '../errors';
 import { FragmenterContext, FragmenterOperation } from '../core';
@@ -32,6 +32,7 @@ export class ModuleDownloader extends (EventEmitter as new () => TypedEventEmitt
         private readonly ctx: FragmenterContext,
         private readonly baseUrl: string,
         private readonly module: DistributionModule,
+        private readonly file: DistributionModuleFile,
         private readonly moduleIndex: number,
         private readonly retryCount: number,
         private readonly fullModuleHash: string,
@@ -45,22 +46,22 @@ export class ModuleDownloader extends (EventEmitter as new () => TypedEventEmitt
     async startDownload(destDir: string): Promise<boolean> {
         this.ctx.currentPhase = { op: FragmenterOperation.InstallModuleDownload, module: this.module, moduleIndex: this.moduleIndex };
 
-        this.probedModuleFileSize = await this.probeModuleCompleteFileSize();
+        this.probedModuleFileSize = await this.probeModuleCompleteFileSize(this.file);
 
-        const moduleSplitFileCount = this.module.splitFileCount;
+        const moduleSplitFileCount = this.file.splitFileCount;
 
         if (Number.isFinite(moduleSplitFileCount) && moduleSplitFileCount > 0) {
             this.ctx.logInfo(`[ModuleDownloader] Downloading module file '${this.module.name}' in ${moduleSplitFileCount} parts`);
 
-            await this.downloadModuleFileParts(destDir);
+            await this.downloadModuleFileParts(destDir, this.file);
 
             this.ctx.logTrace(`[ModuleDownloader] Done downloading module file '${this.module.name}'`);
 
-            return this.mergeModuleFileParts(destDir);
+            return this.mergeModuleFileParts(destDir, this.file);
         } else {
             this.ctx.logInfo(`[ModuleDownloader] Downloading module file '${this.module.name}'`);
 
-            const ret = await this.downloadModuleFile(destDir);
+            const ret = await this.downloadModuleFile(destDir, this.file);
 
             this.ctx.logTrace(`[ModuleDownloader] Done downloading module file '${this.module.name}'`);
 
@@ -68,10 +69,10 @@ export class ModuleDownloader extends (EventEmitter as new () => TypedEventEmitt
         }
     }
 
-    private async probeModuleCompleteFileSize() {
-        const fileName = `${this.module.name}.zip`;
+    private async probeModuleCompleteFileSize(file: DistributionModuleFile) {
+        const filePath = file.path;
 
-        const url = urljoin(this.baseUrl, fileName);
+        const url = urljoin(this.baseUrl, filePath);
 
         let headers;
         try {
@@ -91,12 +92,10 @@ export class ModuleDownloader extends (EventEmitter as new () => TypedEventEmitt
         return undefined;
     }
 
-    private async downloadModuleFile(destDir: string): Promise<boolean> {
-        const fileName = `${this.module.name}.zip`;
+    private async downloadModuleFile(destDir: string, file: DistributionModuleFile): Promise<boolean> {
+        const fileUrl = urljoin(this.baseUrl, file.path);
 
-        const fileUrl = urljoin(this.baseUrl, fileName);
-
-        let url = `${fileUrl}?moduleHash=${this.module.hash.substring(0, 8)}&fullHash=${this.fullModuleHash.substring(0, 8)}`;
+        let url = `${fileUrl}?moduleHash=${file.hash.substring(0, 8)}&fullHash=${this.fullModuleHash.substring(0, 8)}`;
 
         if (this.retryCount) {
             url += `&retry=${this.retryCount}`;
@@ -108,7 +107,7 @@ export class ModuleDownloader extends (EventEmitter as new () => TypedEventEmitt
         downloader.on('progress', (loaded) => {
             this.emit('progress', {
                 loaded,
-                total: this.probedModuleFileSize ?? this.module.completeFileSize,
+                total: this.probedModuleFileSize ?? file.completeFileSize,
                 partLoaded: undefined,
                 partTotal: undefined,
                 partIndex: undefined,
@@ -121,6 +120,13 @@ export class ModuleDownloader extends (EventEmitter as new () => TypedEventEmitt
         });
 
         const filePath = path.join(destDir, `${this.module.name}.zip`);
+        const fileDir = path.dirname(filePath);
+
+        try {
+            await fs.promises.opendir(fileDir);
+        } catch (e) {
+            await fs.promises.mkdir(fileDir);
+        }
 
         try {
             const { error } = await downloader.download(filePath);
@@ -148,8 +154,8 @@ export class ModuleDownloader extends (EventEmitter as new () => TypedEventEmitt
         }
     }
 
-    private async downloadModuleFileParts(destDir: string): Promise<boolean> {
-        const numParts = this.module.splitFileCount;
+    private async downloadModuleFileParts(destDir: string, file: DistributionModuleFile): Promise<boolean> {
+        const numParts = file.splitFileCount;
 
         let totalLoaded = 0;
         for (let i = 0; i < numParts; i++) {
@@ -158,11 +164,11 @@ export class ModuleDownloader extends (EventEmitter as new () => TypedEventEmitt
             const partIndexString = (i + 1).toString()
                 .padStart(numParts.toString().length, '0');
             const partFileSuffix = `sf-part${partIndexString}`;
-            const partFileName = `${this.module.name}.zip.${partFileSuffix}`;
+            const partFilePath = `${file.path}.${partFileSuffix}`;
 
-            const partUrl = urljoin(this.baseUrl, partFileName);
+            const partUrl = urljoin(this.baseUrl, partFilePath);
 
-            let url = `${partUrl}?moduleHash=${this.module.hash.substring(0, 8)}&fullHash=${this.fullModuleHash.substring(0, 8)}&partIndex=${i}`;
+            let url = `${partUrl}?moduleHash=${file.hash.substring(0, 8)}&fullHash=${this.fullModuleHash.substring(0, 8)}&partIndex=${i}`;
 
             if (this.retryCount) {
                 url += `&retry=${this.retryCount}`;
@@ -174,11 +180,11 @@ export class ModuleDownloader extends (EventEmitter as new () => TypedEventEmitt
             partDownloader.on('progress', (loaded, total) => {
                 this.emit('progress', {
                     loaded: totalLoaded + loaded,
-                    total: this.probedModuleFileSize ?? this.module.completeFileSize,
+                    total: this.probedModuleFileSize ?? file.completeFileSize,
                     partLoaded: loaded,
                     partTotal: total,
                     partIndex: i,
-                    numParts: this.module.splitFileCount,
+                    numParts: file.splitFileCount,
                 });
             });
 
@@ -191,6 +197,13 @@ export class ModuleDownloader extends (EventEmitter as new () => TypedEventEmitt
             });
 
             const filePath = path.join(destDir, `${this.module.name}.zip.fg-tmp${partIndexString}`);
+            const filePathDir = path.dirname(filePath);
+
+            try {
+                await fs.promises.opendir(filePathDir);
+            } catch (e) {
+                await fs.promises.mkdir(filePathDir);
+            }
 
             try {
                 const { bytesDownloaded, error } = await partDownloader.download(filePath);
@@ -220,10 +233,10 @@ export class ModuleDownloader extends (EventEmitter as new () => TypedEventEmitt
         return true;
     }
 
-    private async mergeModuleFileParts(destDir: string): Promise<boolean> {
-        this.ctx.logInfo(`[ModuleDownloader] Merging ${this.module.splitFileCount} file parts for module '${this.module.name}'`);
+    private async mergeModuleFileParts(destDir: string, file: DistributionModuleFile): Promise<boolean> {
+        this.ctx.logInfo(`[ModuleDownloader] Merging ${file.splitFileCount} file parts for module '${this.module.name}'`);
 
-        const numParts = this.module.splitFileCount;
+        const numParts = file.splitFileCount;
 
         for (let i = 0; i < numParts; i++) {
             const completeModuleFileWriteStream = fs.createWriteStream(path.join(destDir, `${this.module.name}.zip`), { flags: 'a' });

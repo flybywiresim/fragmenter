@@ -3,7 +3,7 @@ import { IEntryEvent, Unzip } from 'zip-lib';
 import path from 'path';
 import fs from 'fs-extra';
 import TypedEventEmitter from '../typed-emitter';
-import { DistributionModule } from '../types';
+import { DistributionModule, DistributionModuleFile } from '../types';
 import { FragmenterError, FragmenterErrorCode } from '../errors';
 import { FragmenterContext, FragmenterOperation } from '../core';
 
@@ -21,6 +21,7 @@ export class ModuleDecompressor extends (EventEmitter as new () => TypedEventEmi
     constructor(
         private readonly ctx: FragmenterContext,
         private readonly module: DistributionModule,
+        private readonly file: DistributionModuleFile,
         private readonly moduleIndex: number,
     ) {
         // eslint-disable-next-line constructor-super
@@ -68,7 +69,7 @@ export class ModuleDecompressor extends (EventEmitter as new () => TypedEventEmi
         }
 
         const actualCrc = moduleJson.hash;
-        const expectedCrc = this.module.hash;
+        const expectedCrc = this.file.hash;
 
         if (actualCrc !== expectedCrc) {
             throw FragmenterError.create(

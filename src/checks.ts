@@ -3,10 +3,11 @@ import fs from 'fs-extra';
 import urljoin from 'url-join';
 import Axios from 'axios';
 import EventEmitter from 'events';
-import { DistributionManifest, FragmenterUpdateCheckerEvents, InstallManifest, NeedsUpdateOptions, UpdateInfo } from './types';
+import { DistributionManifest, DistributionModule, DistributionModuleFile, FragmenterUpdateCheckerEvents, InstallManifest, NeedsUpdateOptions, UpdateInfo } from './types';
 import { INSTALL_MANIFEST, MODULES_MANIFEST } from './constants';
 import { getLoggerSettingsFromOptions } from './log';
 import TypedEventEmitter from './typed-emitter';
+import { FragmenterError, FragmenterErrorCode } from './errors';
 
 export class FragmenterUpdateChecker extends (EventEmitter as new () => TypedEventEmitter<FragmenterUpdateCheckerEvents>) {
     /**
@@ -67,7 +68,27 @@ export class FragmenterUpdateChecker extends (EventEmitter as new () => TypedEve
 
             updateInfo.needsUpdate = true;
             updateInfo.isFreshInstall = true;
-            updateInfo.addedModules = distribution.modules;
+            updateInfo.addedModules = distribution.modules.map((module) => {
+                let chosenAlternativeKey: string | null = null;
+                if (module.kind === 'alternatives') {
+                    const choice = options?.moduleAlternativesMap?.get(module.name);
+
+                    if (!choice) {
+                        throw FragmenterError.create(FragmenterErrorCode.InvalidOptions, `Alternative not specified for module '${module.name}'`);
+                    }
+
+                    chosenAlternativeKey = choice;
+                }
+
+                const fileToDownload = this.moduleFileToUse(module, chosenAlternativeKey);
+
+                return {
+                    kind: module.kind,
+                    name: module.name,
+                    destDir: module.destDir,
+                    fileToDownload,
+                };
+            });
             updateInfo.baseChanged = true;
             updateInfo.downloadSize = distribution.fullCompleteFileSize;
             updateInfo.requiredDiskSpace = distribution.fullCompleteFileSizeUncompressed;
@@ -81,20 +102,72 @@ export class FragmenterUpdateChecker extends (EventEmitter as new () => TypedEve
             updateInfo.baseChanged = true;
         }
 
-        updateInfo.addedModules = distribution.modules.filter((e) => !existingInstall.modules.find((f) => e.name === f.name));
+        updateInfo.addedModules = distribution.modules.filter((e) => !existingInstall.modules.find((f) => e.name === f.name)).map((module) => {
+            let chosenAlternativeKey: string | null = null;
+            if (module.kind === 'alternatives') {
+                const choice = options?.moduleAlternativesMap?.get(module.name);
+
+                if (!choice) {
+                    throw FragmenterError.create(FragmenterErrorCode.InvalidOptions, `Alternative not specified for module '${module.name}'`);
+                }
+
+                chosenAlternativeKey = choice;
+            }
+
+            const fileToDownload = this.moduleFileToUse(module, chosenAlternativeKey);
+
+            return {
+                kind: module.kind,
+                name: module.name,
+                destDir: module.destDir,
+                fileToDownload,
+            };
+        });
         updateInfo.removedModules = existingInstall.modules.filter((e) => !distribution.modules.find((f) => e.name === f.name));
-        updateInfo.updatedModules = existingInstall.modules.filter((e) => !distribution.modules.find((f) => e.hash === f.hash)
-            && !updateInfo.addedModules.includes(e)
-            && !updateInfo.removedModules.includes(e));
-        updateInfo.unchangedModules = existingInstall.modules.filter((it) => !(updateInfo.addedModules.includes(it))
-            && !(updateInfo.removedModules.includes(it))
-            && !(updateInfo.updatedModules.includes(it)));
+
+        for (const module of existingInstall.modules) {
+            const moduleInDistribution = distribution.modules.find((it) => it.name === module.name);
+
+            if (!moduleInDistribution) {
+                continue;
+            }
+
+            let chosenAlternativeKey: string | null = null;
+            if (module.kind === 'alternatives') {
+                const choice = options?.moduleAlternativesMap?.get(module.name);
+
+                if (!choice) {
+                    throw FragmenterError.create(FragmenterErrorCode.InvalidOptions, `Alternative not specified for module '${module.name}'`);
+                }
+
+                chosenAlternativeKey = choice;
+            }
+
+            const fileToCompare = this.moduleFileToUse(moduleInDistribution, chosenAlternativeKey);
+
+            if (module.kind === 'alternatives' && chosenAlternativeKey === module.installedAlternativeKey) {
+                updateInfo.updatedModules.push({ kind: module.kind, name: module.name, destDir: module.destDir, fileToDownload: fileToCompare });
+                continue;
+            }
+
+            const update = fileToCompare.hash !== module.hash
+                && !updateInfo.addedModules.some((it) => it.name === module.name)
+                && !updateInfo.removedModules.some((it) => it.name === module.name);
+
+            if (update) {
+                updateInfo.updatedModules.push({ kind: module.kind, name: module.name, destDir: module.destDir, fileToDownload: fileToCompare });
+            }
+        }
+
+        updateInfo.unchangedModules = existingInstall.modules.filter((module) => !(updateInfo.addedModules.some((it) => it.name === module.name))
+            && !(updateInfo.removedModules.some((it) => it.name === module.name))
+            && !(updateInfo.updatedModules.some((it) => it.name === module.name)));
 
         if (updateInfo.addedModules.length > 0 || updateInfo.removedModules.length > 0 || updateInfo.updatedModules.length > 0) {
             updateInfo.needsUpdate = true;
 
-            updateInfo.downloadSize = [...updateInfo.addedModules, ...updateInfo.updatedModules].reduce((accu, module) => accu + module.completeFileSize, 0);
-            updateInfo.requiredDiskSpace = [...updateInfo.addedModules, ...updateInfo.updatedModules].reduce((accu, module) => accu + module.completeFileSizeUncompressed, 0);
+            updateInfo.downloadSize = [...updateInfo.addedModules, ...updateInfo.updatedModules].reduce((accu, module) => accu + module.fileToDownload.completeFileSize, 0);
+            updateInfo.requiredDiskSpace = [...updateInfo.addedModules, ...updateInfo.updatedModules].reduce((accu, module) => accu + module.fileToDownload.completeFileSizeUncompressed, 0);
         }
 
         const moduleRatio = (updateInfo.updatedModules.length + updateInfo.addedModules.length) / Math.max(1, updateInfo.existingManifest.modules.length);
@@ -107,6 +180,30 @@ export class FragmenterUpdateChecker extends (EventEmitter as new () => TypedEve
         }
 
         return updateInfo;
+    }
+
+    private moduleFileToUse(module: DistributionModule, chosenAlternativeKey: string | null): DistributionModuleFile {
+        let fileToCompare: DistributionModuleFile;
+        if (module.kind === 'alternatives') {
+            const matchingFile = module.downloadFiles.find((it) => it.key === chosenAlternativeKey);
+
+            if (!matchingFile) {
+                throw FragmenterError.create(
+                    FragmenterErrorCode.InvalidParameters,
+                    `Alternatives module '${module.name}' does not have a download file matching the chosen alternative ('${chosenAlternativeKey}')`,
+                );
+            }
+
+            fileToCompare = matchingFile;
+        } else {
+            if (module.downloadFiles.length !== 1) {
+                throw FragmenterError.create(FragmenterErrorCode.InvalidDistributionManifest, `Non-alternative module '${module.name}' does not have exactly one download file`);
+            }
+
+            [fileToCompare] = module.downloadFiles;
+        }
+
+        return fileToCompare;
     }
 }
 

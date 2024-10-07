@@ -26,8 +26,23 @@ export interface DistributionManifest {
     fullCompleteFileSizeUncompressed?: number;
 }
 
-export interface InstallManifest extends DistributionManifest {
+interface InstalledData {
+    hash: string;
+}
+
+export type InstalledSimpleModule = Omit<SimpleModule, 'sourceDir'> & InstalledData
+
+interface AlternativesInstalledData extends InstalledData {
+    installedAlternativeKey: string;
+}
+
+export type InstalledAlternativesModule = (Omit<AlternativesModule, 'alternatives'>) & AlternativesInstalledData;
+
+export type InstalledModule = InstalledSimpleModule | InstalledAlternativesModule;
+
+export interface InstallManifest extends Omit<DistributionManifest, 'modules'> {
     source: string;
+    modules: InstalledModule[],
 }
 
 export interface InstallInfo {
@@ -35,20 +50,56 @@ export interface InstallInfo {
     manifest: InstallManifest;
 }
 
-export interface Module {
+export interface BaseModule {
+    kind: string;
+    name: string;
+    destDir: string;
+}
+
+export interface SimpleModule extends BaseModule {
+    kind: 'simple';
+    sourceDir: string;
+}
+
+export interface ModuleAlternative {
+    key: string;
     name: string;
     sourceDir: string;
 }
 
-export interface DistributionModule extends Module {
-    hash: string;
-    splitFileCount?: number;
-    completeFileSize?: number;
-    completeFileSizeUncompressed?: number;
+export interface AlternativesModule extends BaseModule {
+    kind: 'alternatives';
+    alternatives: ModuleAlternative[];
 }
+
+export type Module = SimpleModule | AlternativesModule;
+
+export interface DistributionModuleFile {
+    key: string;
+    path: string;
+    hash: string;
+    compression: 'zip';
+    splitFileCount: number;
+    completeFileSize: number;
+    completeFileSizeUncompressed: number;
+}
+
+interface DistributionData {
+    downloadFiles: DistributionModuleFile[],
+}
+
+export type DistributionSimpleModule = Omit<SimpleModule, 'sourceDir'> & DistributionData;
+
+export type DistributionAlternativesModule = (Omit<AlternativesModule, 'alternatives' & { alternatives: Omit<ModuleAlternative, any> }>) & DistributionData;
+
+export type DistributionModule = DistributionSimpleModule | DistributionAlternativesModule;
 
 export interface CrcInfo {
     hash: string;
+}
+
+export interface UpdateModule extends BaseModule {
+    fileToDownload: DistributionModuleFile,
 }
 
 export interface UpdateInfo {
@@ -57,10 +108,10 @@ export interface UpdateInfo {
     baseChanged: boolean;
     willFullyReDownload: boolean;
 
-    addedModules: DistributionModule[];
-    removedModules: DistributionModule[];
-    updatedModules: DistributionModule[];
-    unchangedModules: DistributionModule[];
+    addedModules: UpdateModule[];
+    removedModules: InstalledModule[];
+    updatedModules: UpdateModule[];
+    unchangedModules: InstalledModule[];
 
     /**
      * Download size in bytes of the update, if available
@@ -154,6 +205,13 @@ export type PackOptions = Partial<BaseCommandOptions> & {
  */
 export type NeedsUpdateOptions = Partial<BaseCommandOptions & {
     /**
+     * A map of module names to the alternative file to download.
+     *
+     * Every module of `alternative` kind must have an entry in this map, otherwise an error will be thrown.
+     */
+    moduleAlternativesMap: Map<string, string>,
+
+    /**
      * The ratio at which to force a full install. Default turns this behaviour off; 0.5 means more than half of total modules updated or added leads to a full install.
      */
     forceFullInstallRatio: number,
@@ -161,31 +219,31 @@ export type NeedsUpdateOptions = Partial<BaseCommandOptions & {
 
 export interface FragmenterUpdateCheckerEvents {
     'error': (err: any) => void;
-    'logInfo': (module: Module | null, ...messageBits: any[]) => void;
-    'logWarn': (module: Module | null, ...messageBits: any[]) => void;
-    'logError': (module: Module | null, ...messageBits: any[]) => void;
+    'logInfo': (module: BaseModule | null, ...messageBits: any[]) => void;
+    'logWarn': (module: BaseModule | null, ...messageBits: any[]) => void;
+    'logError': (module: BaseModule | null, ...messageBits: any[]) => void;
 }
 
 export interface FragmenterInstallerEvents {
     'error': (err: any) => void;
     'backupStarted': () => void;
     'backupFinished': () => void;
-    'downloadStarted': (module: Module) => void;
-    'downloadProgress': (module: Module, progress: DownloadProgress) => void;
-    'downloadInterrupted': (module: Module, fromUserAction: boolean) => void;
-    'downloadFinished': (module: Module) => void;
-    'unzipStarted': (module: Module) => void;
-    'unzipProgress': (module: Module, progress: ModuleDecompressorProgress) => void;
-    'unzipFinished': (module: Module) => void;
-    'copyStarted': (module: Module) => void;
-    'copyProgress': (module: Module, progress: CopyProgress) => void;
-    'copyFinished': (module: Module) => void;
-    'retryScheduled': (module: Module, retryCount: number, waitSeconds: number) => void;
-    'retryStarted': (module: Module, retryCount: number) => void;
+    'downloadStarted': (module: BaseModule) => void;
+    'downloadProgress': (module: BaseModule, progress: DownloadProgress) => void;
+    'downloadInterrupted': (module: BaseModule, fromUserAction: boolean) => void;
+    'downloadFinished': (module: BaseModule) => void;
+    'unzipStarted': (module: BaseModule) => void;
+    'unzipProgress': (module: BaseModule, progress: ModuleDecompressorProgress) => void;
+    'unzipFinished': (module: BaseModule) => void;
+    'copyStarted': (module: BaseModule) => void;
+    'copyProgress': (module: BaseModule, progress: CopyProgress) => void;
+    'copyFinished': (module: BaseModule) => void;
+    'retryScheduled': (module: BaseModule, retryCount: number, waitSeconds: number) => void;
+    'retryStarted': (module: BaseModule, retryCount: number) => void;
     'fullDownload': () => void;
     'modularUpdate': () => void;
     'cancelled': () => void;
-    'logInfo': (module: Module | null, ...messageBits: any[]) => void;
-    'logWarn': (module: Module | null, ...messageBits: any[]) => void;
-    'logError': (module: Module | null, ...messageBits: any[]) => void;
+    'logInfo': (module: BaseModule | null, ...messageBits: any[]) => void;
+    'logWarn': (module: BaseModule | null, ...messageBits: any[]) => void;
+    'logError': (module: BaseModule | null, ...messageBits: any[]) => void;
 }

@@ -15,7 +15,7 @@ afterEach(() => {
 jest.setTimeout(360_000);
 
 describe('FragmenterInstaller', () => {
-    const TEST_FILES_BASE_URL = 'https://flybywirecdn.com/addons/fragmenter-test/';
+    const TEST_FILES_BASE_URL = 'https://flybywirecdn.com/addons/fragmenter-test-2/';
 
     const FRESH_INSTALL_PATH = 'tests/out/fresh-install-01/';
 
@@ -23,7 +23,7 @@ describe('FragmenterInstaller', () => {
         const abortController = new AbortController();
 
         const ctx = new FragmenterContext({ forceCacheBust: true, useConsoleLog: true }, abortController.signal);
-        const installer = new FragmenterInstaller(ctx, TEST_FILES_BASE_URL, FRESH_INSTALL_PATH, {});
+        const installer = new FragmenterInstaller(ctx, TEST_FILES_BASE_URL, FRESH_INSTALL_PATH, { moduleAlternativesMap: new Map([['d', 'alt-a']]) });
 
         let lastPct = -1;
         installer.on('error', (e) => console.error(e));

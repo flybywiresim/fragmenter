@@ -3,11 +3,12 @@ import { Zip } from 'zip-lib';
 import SplitFile from 'split-file';
 import path from 'path';
 import readRecurse from 'fs-readdir-recursive';
+import commonAncestorPath from 'common-ancestor-path';
 import hasha from 'hasha';
 import {
     BuildManifest,
     CrcInfo,
-    DistributionManifest, PackOptions,
+    DistributionManifest, DistributionModuleFile, PackOptions,
 } from './types';
 import { BASE_FILE, FULL_FILE, MODULES_MANIFEST, SINGLE_MODULE_MANIFEST, DEFAULT_SPLIT_FILE_SIZE } from './constants';
 
@@ -130,30 +131,66 @@ export async function pack(buildManifest: BuildManifest): Promise<DistributionMa
         return path.replace(/\\/g, '/');
     };
 
-    // Manifest validation: Nested modules are not supported yet
-    buildManifest.modules.forEach((moduleA) => {
+    // Manifest validation
+    for (const moduleA of buildManifest.modules) {
+        // Check for reserved module names
         if (['base', 'full'].includes(moduleA.name.toLowerCase())) {
             throw new Error(`'${moduleA.name}' is a reserved module name`);
         }
 
-        buildManifest.modules.forEach((moduleB) => {
+        // Check for garbage paths
+        if ('kind' in moduleA && moduleA.kind === 'alternatives') {
+            for (const alternative of moduleA.alternatives) {
+                if (path.normalize(alternative.sourceDir).indexOf('..') !== -1) {
+                    throw new Error(`module '${moduleA.name}' alternative '${alternative.key}' contains a backtrack`);
+                }
+            }
+        } else if (path.normalize(moduleA.sourceDir).indexOf('..') !== -1) {
+            throw new Error(`module '${moduleA.name}' contains a backtrack`);
+        }
+
+        // Check for alternatives modules without a common ancestor
+        if ('kind' in moduleA && moduleA.kind === 'alternatives') {
+            const commonAlternativesSourceDir = commonAncestorPath(...moduleA.alternatives.map((it) => it.sourceDir));
+
+            if (!commonAlternativesSourceDir) {
+                throw new Error(`alternatives for module '${moduleA.name}' must all have a sourceDir that share a common ancestor`);
+            }
+        }
+
+        // Nested modules are not supported yet
+        for (const moduleB of buildManifest.modules) {
             if (moduleA !== moduleB) {
-                const pathDiff = path.relative(moduleA.sourceDir, moduleB.sourceDir);
+                let moduleASourceDir: string;
+                if ('kind' in moduleA && moduleA.kind === 'alternatives') {
+                    moduleASourceDir = commonAncestorPath(...moduleA.alternatives.map((it) => it.sourceDir));
+                } else {
+                    moduleASourceDir = moduleA.sourceDir;
+                }
+
+                let moduleBSourceDir: string;
+                if ('kind' in moduleB && moduleB.kind === 'alternatives') {
+                    moduleBSourceDir = commonAncestorPath(...moduleB.alternatives.map((it) => it.sourceDir));
+                } else {
+                    moduleBSourceDir = moduleB.sourceDir;
+                }
+
+                const pathDiff = path.relative(moduleASourceDir, moduleBSourceDir);
 
                 if (!pathDiff.startsWith('..')) {
                     throw new Error(`Module '${moduleA.name}' contains '${moduleB.name}'. Modules within modules are not supported yet!`);
                 }
             }
-        });
-    });
+        }
+    }
 
     const moduleNames: string[] = [''];
-    buildManifest.modules.forEach((module) => {
+    for (const module of buildManifest.modules) {
         if (moduleNames.includes(module.name)) {
             throw new Error(`Module name '${module.name}' is set for more than one module. Each module must have a unique name!`);
         }
         moduleNames.push(module.name);
-    });
+    }
 
     if (!fs.existsSync(buildManifest.baseDir)) {
         throw new Error('Base directory does not exist');
@@ -201,18 +238,53 @@ export async function pack(buildManifest: BuildManifest): Promise<DistributionMa
         console.log('[FRAGMENT] Creating module ZIPs');
 
         for (const module of buildManifest.modules) {
-            const sourcePath = path.join(tempDir, module.sourceDir);
-            const zipDest = path.join(buildManifest.outDir, `${module.name}.zip`);
+            const files: DistributionModuleFile[] = [];
 
-            const [hash, splitFileCount, completeFileSize, completeFileSizeUncompressed] = await zipAndDelete(sourcePath, zipDest);
+            if ('kind' in module && module.kind === 'alternatives') {
+                for (const alternative of module.alternatives) {
+                    const sourcePath = path.join(tempDir, alternative.sourceDir);
+                    const moduleFilePath = `${module.name}/${alternative.key}.zip`;
+                    const zipDest = path.join(buildManifest.outDir, moduleFilePath);
 
-            distributionManifest.modules.push({
-                ...module,
-                hash,
-                splitFileCount,
-                completeFileSize,
-                completeFileSizeUncompressed,
-            });
+                    const [hash, splitFileCount, completeFileSize, completeFileSizeUncompressed] = await zipAndDelete(sourcePath, zipDest);
+
+                    files.push({
+                        key: alternative.key,
+                        path: moduleFilePath,
+                        hash,
+                        compression: 'zip',
+                        splitFileCount,
+                        completeFileSize,
+                        completeFileSizeUncompressed,
+                    });
+                }
+            } else {
+                const sourcePath = path.join(tempDir, module.sourceDir);
+                const moduleFilePath = `${module.name}.zip`;
+                const zipDest = path.join(buildManifest.outDir, moduleFilePath);
+
+                const [hash, splitFileCount, completeFileSize, completeFileSizeUncompressed] = await zipAndDelete(sourcePath, zipDest);
+
+                files.push({
+                    key: 'main',
+                    path: moduleFilePath,
+                    hash,
+                    compression: 'zip',
+                    splitFileCount,
+                    completeFileSize,
+                    completeFileSizeUncompressed,
+                });
+            }
+
+            if (module.kind === 'alternatives') {
+                for (const alternative of module.alternatives) {
+                    delete alternative.sourceDir;
+                }
+            } else {
+                delete module.sourceDir;
+            }
+
+            distributionManifest.modules.push({ ...module, downloadFiles: files });
         }
 
         // Zip the rest

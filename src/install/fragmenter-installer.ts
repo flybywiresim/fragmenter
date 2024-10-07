@@ -6,7 +6,7 @@ import { promisify } from 'util';
 import readRecurse from 'fs-readdir-recursive';
 import TypedEventEmitter from '../typed-emitter';
 import { FragmenterUpdateChecker } from '../checks';
-import { DistributionModule, FragmenterInstallerEvents, InstallInfo, InstallManifest, UpdateInfo } from '../types';
+import { BaseModule, DistributionModule, DistributionModuleFile, FragmenterInstallerEvents, InstallInfo, InstallManifest, UpdateInfo } from '../types';
 import { INSTALL_MANIFEST } from '../constants';
 import { ModuleDownloader } from './module-downloader';
 import { ModuleDecompressor } from './module-decompressor';
@@ -20,6 +20,13 @@ const DEFAULT_TEMP_DIRECTORY_PREFIX = 'fragmenter-temp';
  * Options passed to a {@link FragmenterInstaller}
  */
 export type InstallOptions = Partial<{
+    /**
+     * A map of module names to the alternative file to download.
+     *
+     * Every module of `alternative` kind must have an entry in this map, otherwise an error will be thrown.
+     */
+    moduleAlternativesMap: Map<string, string>,
+
     /**
      * Provides a custom temporary directory for use when extracting compressed modules.
      *
@@ -157,48 +164,72 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             return { changed: false, manifest: updateInfo.existingManifest };
         }
 
-        let newInstallManifest: InstallManifest;
+        // let newInstallManifest: InstallManifest;
 
-        const allUpdated = updateInfo.updatedModules.length + updateInfo.removedModules.length === updateInfo.existingManifest?.modules.length;
+        // const allUpdated = updateInfo.updatedModules.length + updateInfo.removedModules.length === updateInfo.existingManifest?.modules.length;
 
-        if (allUpdated || updateInfo.willFullyReDownload || updateInfo.isFreshInstall) {
-            this.ctx.logInfo('[FragmenterInstaller] All modules need update - performing full install');
+        // if (allUpdated || updateInfo.willFullyReDownload || updateInfo.isFreshInstall) {
+        //     this.ctx.logInfo('[FragmenterInstaller] All modules need update - performing full install');
+        //
+        //     newInstallManifest = await this.performFullInstall(updateInfo);
+        // } else {
+        this.ctx.logInfo('[FragmenterInstaller] Not all modules need update - performing modular update');
 
-            newInstallManifest = await this.performFullInstall(updateInfo);
-        } else {
-            this.ctx.logInfo('[FragmenterInstaller] Not all modules need update - performing modular update');
-
-            newInstallManifest = await this.performModularUpdate(updateInfo);
-        }
+        const newInstallManifest = await this.performModularUpdate(updateInfo);
+        // }
 
         return this.finishInstall(newInstallManifest);
     }
 
-    private async performFullInstall(updateInfo: UpdateInfo): Promise<InstallManifest> {
-        this.emit('fullDownload');
-
-        await this.ensureTempDirExists();
-        await this.backupExistingFiles();
-        await this.ensureDestDirIsEmpty();
-
-        const fullModule: DistributionModule = {
-            name: 'full',
-            sourceDir: '.',
-            hash: updateInfo.distributionManifest.fullHash,
-            splitFileCount: updateInfo.distributionManifest.fullSplitFileCount,
-            completeFileSize: updateInfo.distributionManifest.fullCompleteFileSize,
-            completeFileSizeUncompressed: updateInfo.distributionManifest.fullCompleteFileSizeUncompressed,
-        };
-
-        await this.downloadAndInstallModule(fullModule, 0, updateInfo.distributionManifest.fullHash);
-
-        this.ctx.currentPhase = { op: FragmenterOperation.InstallFinish };
-
-        return {
-            ...updateInfo.distributionManifest,
-            source: this.baseUrl,
-        };
-    }
+    // private async performFullInstall(updateInfo: UpdateInfo): Promise<InstallManifest> {
+    //     this.emit('fullDownload');
+    //
+    //     await this.ensureTempDirExists();
+    //     await this.backupExistingFiles();
+    //     await this.ensureDestDirIsEmpty();
+    //
+    //     const fullModule: DistributionModule = {
+    //         kind: 'simple',
+    //         name: 'full',
+    //         destDir: '.',
+    //         downloadFiles: [
+    //             {
+    //                 key: 'main',
+    //                 path: 'full.zip',
+    //                 hash: updateInfo.distributionManifest.fullHash,
+    //                 compression: 'zip',
+    //                 splitFileCount: updateInfo.distributionManifest.fullSplitFileCount,
+    //                 completeFileSize: updateInfo.distributionManifest.fullCompleteFileSize,
+    //                 completeFileSizeUncompressed: updateInfo.distributionManifest.fullCompleteFileSizeUncompressed,
+    //             },
+    //         ],
+    //     };
+    //
+    //     await this.downloadAndInstallModule(fullModule, 0, updateInfo.distributionManifest.fullHash);
+    //
+    //     this.ctx.currentPhase = { op: FragmenterOperation.InstallFinish };
+    //
+    //     return {
+    //         ...updateInfo.distributionManifest,
+    //         source: this.baseUrl,
+    //         modules: updateInfo.distributionManifest.modules.map((it) => {
+    //             if (it.kind === 'alternatives') {
+    //                 return {
+    //                     kind: 'alternatives',
+    //                     name: it.name,
+    //                     destDir: it.destDir,
+    //                     installedAlternativeKey: this.options.moduleAlternativesMap.get(it.name),
+    //                 };
+    //             } else {
+    //                 return {
+    //                     kind: 'simple',
+    //                     name: it.name,
+    //                     destDir: it.destDir,
+    //                 };
+    //             }
+    //         }),
+    //     };
+    // }
 
     private async performModularUpdate(updateInfo: UpdateInfo): Promise<InstallManifest> {
         let moduleIndex = 0;
@@ -227,59 +258,75 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         if (updateInfo.baseChanged) {
             this.ctx.logInfo('[FragmenterInstaller] Base files changed - updating');
 
-            try {
-                const baseModule = {
-                    name: 'base',
-                    sourceDir: '.',
-                    hash: updateInfo.distributionManifest.base.hash,
-                    splitFileCount: updateInfo.distributionManifest.base.splitFileCount,
-                    completeFileSize: updateInfo.distributionManifest.base.completeFileSize,
-                    completeFileSizeUncompressed: updateInfo.distributionManifest.base.completeFileSizeUncompressed,
-                };
+            // try {
+            const baseModule: DistributionModule = {
+                kind: 'simple',
+                name: 'base',
+                destDir: '.',
+                downloadFiles: [
+                    {
+                        key: 'main',
+                        path: 'base.zip',
+                        compression: 'zip',
+                        hash: updateInfo.distributionManifest.base.hash,
+                        splitFileCount: updateInfo.distributionManifest.base.splitFileCount,
+                        completeFileSize: updateInfo.distributionManifest.base.completeFileSize,
+                        completeFileSizeUncompressed: updateInfo.distributionManifest.base.completeFileSizeUncompressed,
+                    },
+                ],
+            };
 
-                await this.downloadAndInstallModule(baseModule, moduleIndex, updateInfo.distributionManifest.fullHash, false);
-                moduleIndex++;
+            await this.downloadAndInstallModule(baseModule, moduleIndex, updateInfo.distributionManifest.fullHash, false);
+            moduleIndex++;
 
-                const { files } = updateInfo.distributionManifest.base;
+            const { files } = updateInfo.distributionManifest.base;
 
-                this.emit('copyStarted', baseModule);
-                let moved = 0;
-                for (const file of files) {
-                    const absoluteSourcePath = path.join(this.options.temporaryDirectory, 'extract', 'base', file);
-                    const absoluteDestPath = path.join(this.destDir, file);
+            this.emit('copyStarted', baseModule);
+            let moved = 0;
+            for (const file of files) {
+                const absoluteSourcePath = path.join(this.options.temporaryDirectory, 'extract', 'base', file);
+                const absoluteDestPath = path.join(this.destDir, file);
 
-                    try {
-                        await fs.move(absoluteSourcePath, absoluteDestPath, { overwrite: true });
+                try {
+                    await fs.move(absoluteSourcePath, absoluteDestPath, { overwrite: true });
 
-                        this.emit('copyProgress', baseModule, { moved: ++moved, total: files.length });
-                    } catch (e) {
-                        this.ctx.logError(`[FragmenterInstaller] Error while moving over file '${absoluteSourcePath}' -> '${absoluteDestPath}'`);
+                    this.emit('copyProgress', baseModule, { moved: ++moved, total: files.length });
+                } catch (e) {
+                    this.ctx.logError(`[FragmenterInstaller] Error while moving over file '${absoluteSourcePath}' -> '${absoluteDestPath}'`);
 
-                        throw FragmenterError.createFromError(e);
-                    }
+                    throw FragmenterError.createFromError(e);
                 }
-                this.emit('copyFinished', baseModule);
-
-                newInstallManifest.base = updateInfo.distributionManifest.base;
-            } catch (e) {
-                const isMaxRetriesReached = FragmenterError.isFragmenterError(e) && e.code === FragmenterErrorCode.MaxModuleRetries;
-
-                if (isMaxRetriesReached && !this.options?.disableFallbackToFull) {
-                    return this.performFullInstall(updateInfo);
-                }
-
-                throw e;
             }
+            this.emit('copyFinished', baseModule);
+
+            newInstallManifest.base = updateInfo.distributionManifest.base;
+            // } catch (e) {
+            // const isMaxRetriesReached = FragmenterError.isFragmenterError(e) && e.code === FragmenterErrorCode.MaxModuleRetries;
+
+            // if (isMaxRetriesReached && !this.options?.disableFallbackToFull) {
+            //     return this.performFullInstall(updateInfo);
+            // }
+
+            // throw e;
+            // }
         } else {
             this.ctx.logTrace('[FragmenterInstaller] Base files not changed - moving them back over');
 
-            const baseModule = {
+            const baseModule: DistributionModule = {
+                kind: 'simple',
                 name: 'base',
-                sourceDir: '.',
-                hash: updateInfo.distributionManifest.base.hash,
-                splitFileCount: updateInfo.distributionManifest.base.splitFileCount,
-                completeFileSize: updateInfo.distributionManifest.base.completeFileSize,
-                completeFileSizeUncompressed: updateInfo.distributionManifest.base.completeFileSizeUncompressed,
+                destDir: '.',
+                downloadFiles: [
+                    {
+                        key: 'main',
+                        path: 'base.zip',
+                        hash: updateInfo.distributionManifest.base.hash,
+                        compression: 'zip',
+                        splitFileCount: updateInfo.distributionManifest.base.splitFileCount,
+                        completeFileSize: updateInfo.distributionManifest.base.completeFileSize,
+                        completeFileSizeUncompressed: updateInfo.distributionManifest.base.completeFileSizeUncompressed,
+                    },
+                ],
             };
 
             const { files } = updateInfo.existingManifest.base;
@@ -301,7 +348,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             }
         }
 
-        newInstallManifest.modules = updateInfo.existingManifest.modules;
+        newInstallManifest.modules = updateInfo.unchangedModules;
 
         for (const module of [...updateInfo.removedModules, ...updateInfo.updatedModules]) {
             const moduleIndexInManifest = newInstallManifest.modules.findIndex((m) => m.name === module.name);
@@ -309,51 +356,75 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
             newInstallManifest.modules.splice(moduleIndexInManifest, 1);
         }
 
-        try {
-            for (const module of [...updateInfo.updatedModules, ...updateInfo.addedModules]) {
-                const newModule = updateInfo.distributionManifest.modules.find((m) => m.name === module.name);
+        // try {
+        for (const module of [...updateInfo.updatedModules, ...updateInfo.addedModules]) {
+            const newModule = updateInfo.distributionManifest.modules.find((m) => m.name === module.name);
 
-                this.ctx.logInfo(`[FragmenterInstaller] Installing new or updated module '${newModule.name}'`);
+            this.ctx.logInfo(`[FragmenterInstaller] Installing new or updated module '${newModule.name}'`);
 
-                newInstallManifest.modules.push(newModule);
+            const installedFile = await this.downloadAndInstallModule(newModule, moduleIndex, updateInfo.distributionManifest.fullHash);
+            moduleIndex++;
 
-                await this.downloadAndInstallModule(newModule, moduleIndex, updateInfo.distributionManifest.fullHash);
-                moduleIndex++;
+            if (newModule.kind === 'alternatives') {
+                newInstallManifest.modules.push({
+                    kind: 'alternatives',
+                    name: newModule.name,
+                    destDir: newModule.destDir,
+                    hash: installedFile.hash,
+                    installedAlternativeKey: this.options.moduleAlternativesMap.get(newModule.name),
+                });
+            } else {
+                newInstallManifest.modules.push({
+                    kind: 'simple',
+                    name: newModule.name,
+                    destDir: newModule.destDir,
+                    hash: installedFile.hash,
+                });
             }
-
-            this.ctx.currentPhase = { op: FragmenterOperation.InstallFinish };
-
-            for (const module of updateInfo.unchangedModules) {
-                const newModule = updateInfo.distributionManifest.modules.find((m) => m.name === module.name);
-
-                this.ctx.logInfo(`[FragmenterInstaller] Moving back unchanged module '${newModule.name}'`);
-
-                await this.moveOverBackedUpFiles(module);
-            }
-
-            newInstallManifest.fullHash = updateInfo.distributionManifest.fullHash;
-            newInstallManifest.fullSplitFileCount = updateInfo.distributionManifest.fullSplitFileCount;
-            newInstallManifest.fullCompleteFileSize = updateInfo.distributionManifest.fullCompleteFileSize;
-        } catch (error) {
-            const isMaxRetriesReached = FragmenterError.isFragmenterError(error) && error.code === FragmenterErrorCode.MaxModuleRetries;
-
-            if (isMaxRetriesReached && !this.options?.disableFallbackToFull) {
-                return this.performFullInstall(updateInfo);
-            }
-
-            throw error;
         }
+
+        this.ctx.currentPhase = { op: FragmenterOperation.InstallFinish };
+
+        for (const module of updateInfo.unchangedModules) {
+            const newModule = updateInfo.distributionManifest.modules.find((m) => m.name === module.name);
+
+            this.ctx.logInfo(`[FragmenterInstaller] Moving back unchanged module '${newModule.name}'`);
+
+            await this.moveOverBackedUpFiles(module);
+        }
+
+        newInstallManifest.fullHash = updateInfo.distributionManifest.fullHash;
+        newInstallManifest.fullSplitFileCount = updateInfo.distributionManifest.fullSplitFileCount;
+        newInstallManifest.fullCompleteFileSize = updateInfo.distributionManifest.fullCompleteFileSize;
+        // } catch (error) {
+        // const isMaxRetriesReached = FragmenterError.isFragmenterError(error) && error.code === FragmenterErrorCode.MaxModuleRetries;
+
+        // if (isMaxRetriesReached && !this.options?.disableFallbackToFull) {
+        //     return this.performFullInstall(updateInfo);
+        // }
+
+        // throw error;
+        // }
 
         return newInstallManifest;
     }
 
-    async downloadAndInstallModule(module: DistributionModule, moduleIndex: number, fullModuleHash: string, move = true): Promise<void> {
+    async downloadAndInstallModule(module: DistributionModule, moduleIndex: number, fullModuleHash: string, move = true): Promise<DistributionModuleFile> {
+        let chosenAlternativeName: string | null = null;
+        if (module.kind === 'alternatives') {
+            const choice = this.options.moduleAlternativesMap.get(module.name);
+
+            if (!choice) {
+                throw FragmenterError.create(FragmenterErrorCode.InvalidOptions, `Alternative not specified for module '${module.name}'`);
+            }
+
+            chosenAlternativeName = choice;
+        }
+
         let retryCount = 0;
         while (retryCount < 5) {
             try {
-                await this.tryDownloadAndInstallModule(module, moduleIndex, retryCount, fullModuleHash, move);
-
-                return;
+                return this.tryDownloadAndInstallModule(module, chosenAlternativeName, moduleIndex, retryCount, fullModuleHash, move);
             } catch (e) {
                 if (FragmenterError.isFragmenterError(e)) {
                     throw e;
@@ -392,12 +463,39 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         );
     }
 
-    private async tryDownloadAndInstallModule(module: DistributionModule, moduleIndex: number, retryCount: number, fullModuleHash: string, move = true): Promise<void> {
+    private async tryDownloadAndInstallModule(
+        module: DistributionModule,
+        chosenAlternativeName: string | null,
+        moduleIndex: number,
+        retryCount: number,
+        fullModuleHash: string,
+        move = true,
+    ): Promise<DistributionModuleFile> {
         this.ctx.logInfo(`[FragmenterInstaller] Downloading and installing module '${module.name}'`);
+
+        let fileToDownload: DistributionModuleFile;
+        if (module.kind === 'alternatives') {
+            const matchingFile = module.downloadFiles.find((it) => it.key === chosenAlternativeName);
+
+            if (!matchingFile) {
+                throw FragmenterError.create(
+                    FragmenterErrorCode.InvalidParameters,
+                    `Alternatives module '${module.name}' does not have a download file matching the chosen alternative ('${chosenAlternativeName}')`,
+                );
+            }
+
+            fileToDownload = matchingFile;
+        } else {
+            if (module.downloadFiles.length !== 1) {
+                throw FragmenterError.create(FragmenterErrorCode.InvalidDistributionManifest, `Non-alternative module '${module.name}' does not have exactly one download file`);
+            }
+
+            [fileToDownload] = module.downloadFiles;
+        }
 
         this.emit('downloadStarted', module);
 
-        const downloader = new ModuleDownloader(this.ctx, this.baseUrl, module, moduleIndex, retryCount, fullModuleHash);
+        const downloader = new ModuleDownloader(this.ctx, this.baseUrl, module, fileToDownload, moduleIndex, retryCount, fullModuleHash);
 
         downloader.on('progress', (p) => {
             const pct = Math.round((p.loaded / p.total) * 100);
@@ -415,7 +513,7 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
 
         this.emit('downloadFinished', module);
 
-        const decompressor = new ModuleDecompressor(this.ctx, module, moduleIndex);
+        const decompressor = new ModuleDecompressor(this.ctx, module, fileToDownload, moduleIndex);
 
         decompressor.on('progress', (p) => this.emit('unzipProgress', module, p));
 
@@ -435,6 +533,8 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         }
 
         this.ctx.logTrace(`[FragmenterInstaller] Done downloading and installing module '${module.name}'`);
+
+        return fileToDownload;
     }
 
     private async cleanupTempModuleFiles(module: DistributionModule) {
@@ -478,21 +578,21 @@ export class FragmenterInstaller extends (EventEmitter as new () => TypedEventEm
         this.ctx.logTrace(`[FragmenterInstaller] Done cleaning up temporary module files for '${module.name}'`);
     }
 
-    private async moveOverBackedUpFiles(module: DistributionModule) {
-        const restoreDir = path.join(this.options.temporaryDirectory, 'restore', module.sourceDir);
-        const destModuleDir = path.join(this.destDir, module.sourceDir);
+    private async moveOverBackedUpFiles(module: BaseModule) {
+        const restoreDir = path.join(this.options.temporaryDirectory, 'restore', module.destDir);
+        const destModuleDir = path.join(this.destDir, module.destDir);
 
         await this.moveOverModuleFiles(module, restoreDir, destModuleDir);
     }
 
-    private async moveOverExtractedFiles(module: DistributionModule) {
+    private async moveOverExtractedFiles(module: BaseModule) {
         const extractedDir = path.join(this.options.temporaryDirectory, 'extract', module.name);
-        const destModuleDir = path.join(this.destDir, module.sourceDir);
+        const destModuleDir = path.join(this.destDir, module.destDir);
 
         await this.moveOverModuleFiles(module, extractedDir, destModuleDir);
     }
 
-    private async moveOverModuleFiles(module: DistributionModule, sourceDir: string, destModuleDir: string) {
+    private async moveOverModuleFiles(module: BaseModule, sourceDir: string, destModuleDir: string) {
         this.ctx.logInfo(`[FragmenterInstaller] Moving files from '${sourceDir}' -> '${destModuleDir}'`);
 
         const files = readRecurse(sourceDir);

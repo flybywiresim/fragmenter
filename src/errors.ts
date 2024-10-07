@@ -1,5 +1,8 @@
 export enum FragmenterErrorCode {
     Null,
+    InvalidOptions,
+    InvalidDistributionManifest,
+    InvalidParameters,
     PermissionsError,
     ResourcesBusy,
     NoSpaceOnDevice,
